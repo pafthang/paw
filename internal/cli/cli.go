@@ -13,6 +13,7 @@ import (
 
 	"github.com/pafthang/paw/internal/config"
 	"github.com/pafthang/paw/internal/health"
+	"github.com/pafthang/paw/internal/llm"
 	"github.com/pafthang/paw/internal/server"
 )
 
@@ -24,6 +25,8 @@ func Run(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "serve":
 		return runServe(ctx, args[1:])
+	case "chat", "ask":
+		return runChat(ctx, os.Stdout, args[1:])
 	case "status":
 		return runStatus(os.Stdout)
 	case "doctor", "health":
@@ -34,7 +37,7 @@ func Run(ctx context.Context, args []string) error {
 		printHelp(os.Stdout)
 		return nil
 	case "version", "--version", "-v":
-		fmt.Fprintln(os.Stdout, "paw go-core-stage1")
+		fmt.Fprintln(os.Stdout, "paw go-core-stage2")
 		return nil
 	default:
 		printHelp(os.Stderr)
@@ -59,6 +62,44 @@ func runServe(ctx context.Context, args []string) error {
 	return server.New(settings).Run(ctx)
 }
 
+func runChat(ctx context.Context, out io.Writer, args []string) error {
+	settings, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	model := fs.String("model", llm.DefaultModel(settings), "model to use")
+	jsonOut := fs.Bool("json", false, "print JSON response")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if prompt == "" {
+		return errors.New("usage: paw chat [--model MODEL] <prompt>")
+	}
+
+	client, err := llm.NewClient(settings)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Chat(ctx, llm.ChatRequest{
+		Model: *model,
+		Messages: []llm.Message{
+			{Role: "user", Content: prompt},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return json.NewEncoder(out).Encode(resp)
+	}
+	fmt.Fprintln(out, resp.Content)
+	return nil
+}
+
 func runStatus(out io.Writer) error {
 	settings, err := config.Load()
 	if err != nil {
@@ -67,12 +108,13 @@ func runStatus(out io.Writer) error {
 	payload := map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage1",
+		"stage":         "core-stage2",
 		"config_dir":    must(config.Dir()),
 		"config_path":   must(config.Path()),
 		"web_host":      settings.WebHost,
 		"web_port":      settings.WebPort,
 		"agent_backend": settings.AgentBackend,
+		"model":         settings.Model,
 	}
 	return json.NewEncoder(out).Encode(payload)
 }
@@ -149,8 +191,12 @@ func configSet(out io.Writer, key, value string) error {
 		settings.WebPort = port
 	case "agent_backend":
 		settings.AgentBackend = value
+	case "model":
+		settings.Model = value
 	case "ollama_host":
 		settings.OllamaHost = value
+	case "openai_compatible_base_url":
+		settings.OpenAICompatibleBaseURL = value
 	case "openai_api_key":
 		settings.OpenAIAPIKey = value
 	case "anthropic_api_key":
@@ -158,7 +204,7 @@ func configSet(out io.Writer, key, value string) error {
 	case "telegram_bot_token":
 		settings.TelegramBotToken = value
 	default:
-		keys := []string{"web_host", "web_port", "agent_backend", "ollama_host", "openai_api_key", "anthropic_api_key", "telegram_bot_token"}
+		keys := []string{"web_host", "web_port", "agent_backend", "model", "ollama_host", "openai_compatible_base_url", "openai_api_key", "anthropic_api_key", "telegram_bot_token"}
 		sort.Strings(keys)
 		return fmt.Errorf("unknown config key %q; supported: %s", key, strings.Join(keys, ", "))
 	}
@@ -170,11 +216,13 @@ func configSet(out io.Writer, key, value string) error {
 }
 
 func printHelp(out io.Writer) {
-	fmt.Fprint(out, `paw - PocketPaw Go core stage 1
+	fmt.Fprint(out, `paw - PocketPaw Go core stage 2
 
 Usage:
   paw                         Start API server
   paw serve [--host H] [--port P]
+  paw chat [--model MODEL] <prompt>
+  paw ask [--model MODEL] <prompt>
   paw status                  Print local status as JSON
   paw doctor [--json]          Run basic health checks
   paw health [--json]          Alias for doctor
