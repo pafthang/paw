@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -12,88 +11,150 @@ import (
 	"strings"
 
 	"github.com/pafthang/paw/internal/config"
+	"github.com/pafthang/paw/internal/db"
 	"github.com/pafthang/paw/internal/health"
 	"github.com/pafthang/paw/internal/llm"
 	"github.com/pafthang/paw/internal/server"
+	"github.com/spf13/cobra"
 )
 
 func Run(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return runServe(ctx, nil)
-	}
+	root := newRootCommand(ctx, os.Stdout)
+	root.SetArgs(args)
+	return root.Execute()
+}
 
-	switch args[0] {
-	case "serve":
-		return runServe(ctx, args[1:])
-	case "chat", "ask":
-		return runChat(ctx, os.Stdout, args[1:])
-	case "status":
-		return runStatus(os.Stdout)
-	case "doctor", "health":
-		return runDoctor(ctx, os.Stdout, args[1:])
-	case "config":
-		return runConfig(os.Stdout, args[1:])
-	case "help", "--help", "-h":
-		printHelp(os.Stdout)
-		return nil
-	case "version", "--version", "-v":
-		fmt.Fprintln(os.Stdout, "paw go-core-stage2")
-		return nil
-	default:
-		printHelp(os.Stderr)
-		return fmt.Errorf("unknown command %q", args[0])
+func newRootCommand(ctx context.Context, out io.Writer) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "paw",
+		Short:         "PocketPaw Go core",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runServe(ctx, cmd, args)
+		},
+	}
+	root.SetOut(out)
+	root.SetErr(os.Stderr)
+	root.Version = "go-core-stage3"
+
+	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out))
+	root.AddCommand(&cobra.Command{
+		Use:     "ask [prompt]",
+		Short:   "Alias for chat",
+		Args:    cobra.MinimumNArgs(1),
+		RunE:    func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) },
+		PreRunE: func(cmd *cobra.Command, args []string) error { return nil },
+	})
+	return root
+}
+
+func newServeCommand(ctx context.Context) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the API server",
+		RunE:  func(cmd *cobra.Command, args []string) error { return runServe(ctx, cmd, args) },
+	}
+	cmd.Flags().String("host", "", "host to bind")
+	cmd.Flags().Int("port", 0, "port to bind")
+	return cmd
+}
+
+func newChatCommand(ctx context.Context, out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "chat [prompt]",
+		Short:   "Send a prompt to the configured LLM",
+		Args:    cobra.MinimumNArgs(1),
+		RunE:    func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) },
+	}
+	cmd.Flags().String("model", "", "model to use")
+	cmd.Flags().Bool("json", false, "print JSON response")
+	return cmd
+}
+
+func newStatusCommand(out io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Print local status as JSON",
+		RunE:  func(cmd *cobra.Command, args []string) error { return runStatus(out) },
 	}
 }
 
-func runServe(ctx context.Context, args []string) error {
+func newDoctorCommand(ctx context.Context, out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "doctor",
+		Aliases: []string{"health"},
+		Short:   "Run basic health checks",
+		RunE:    func(cmd *cobra.Command, args []string) error { return runDoctor(ctx, out, cmd) },
+	}
+	cmd.Flags().Bool("json", false, "print JSON response")
+	return cmd
+}
+
+func newConfigCommand(out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{Use: "config", Short: "Manage local config", RunE: func(cmd *cobra.Command, args []string) error { return runConfigShow(out) }}
+	cmd.AddCommand(
+		&cobra.Command{Use: "show", Short: "Print masked settings JSON", RunE: func(cmd *cobra.Command, args []string) error { return runConfigShow(out) }},
+		&cobra.Command{Use: "init", Short: "Create ~/.pocketpaw/config.json", RunE: func(cmd *cobra.Command, args []string) error { return runConfigInit(out) }},
+		&cobra.Command{Use: "path", Short: "Print config path", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.Path())); return nil }},
+		&cobra.Command{Use: "dir", Short: "Print config directory", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.Dir())); return nil }},
+		&cobra.Command{Use: "set <key> <value>", Short: "Save a supported config key", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error { return configSet(out, args[0], strings.Join(args[1:], " ")) }},
+	)
+	return cmd
+}
+
+func newDBCommand(out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{Use: "db", Short: "Manage local SQLite database"}
+	cmd.AddCommand(
+		&cobra.Command{Use: "path", Short: "Print SQLite database path", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.DBPath())); return nil }},
+		&cobra.Command{Use: "init", Short: "Open and migrate local SQLite database", RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := db.Open(); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, must(config.DBPath()))
+			return nil
+		}},
+	)
+	return cmd
+}
+
+func runServe(ctx context.Context, cmd *cobra.Command, args []string) error {
 	settings, err := config.Load()
 	if err != nil {
 		return err
 	}
-
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.StringVar(&settings.WebHost, "host", settings.WebHost, "host to bind")
-	fs.IntVar(&settings.WebPort, "port", settings.WebPort, "port to bind")
-	if err := fs.Parse(args); err != nil {
-		return err
+	if host, _ := cmd.Flags().GetString("host"); host != "" {
+		settings.WebHost = host
 	}
-
+	if port, _ := cmd.Flags().GetInt("port"); port > 0 {
+		settings.WebPort = port
+	}
 	return server.New(settings).Run(ctx)
 }
 
-func runChat(ctx context.Context, out io.Writer, args []string) error {
+func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []string) error {
 	settings, err := config.Load()
 	if err != nil {
 		return err
 	}
-
-	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	model := fs.String("model", llm.DefaultModel(settings), "model to use")
-	jsonOut := fs.Bool("json", false, "print JSON response")
-	if err := fs.Parse(args); err != nil {
-		return err
+	model, _ := cmd.Flags().GetString("model")
+	if model == "" {
+		model = llm.DefaultModel(settings)
 	}
-	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	prompt := strings.TrimSpace(strings.Join(args, " "))
 	if prompt == "" {
 		return errors.New("usage: paw chat [--model MODEL] <prompt>")
 	}
-
 	client, err := llm.NewClient(settings)
 	if err != nil {
 		return err
 	}
-	resp, err := client.Chat(ctx, llm.ChatRequest{
-		Model: *model,
-		Messages: []llm.Message{
-			{Role: "user", Content: prompt},
-		},
-	})
+	resp, err := client.Chat(ctx, llm.ChatRequest{Model: model, Messages: []llm.Message{{Role: "user", Content: prompt}}})
 	if err != nil {
 		return err
 	}
-	if *jsonOut {
+	if jsonOut {
 		return json.NewEncoder(out).Encode(resp)
 	}
 	fmt.Fprintln(out, resp.Content)
@@ -108,9 +169,11 @@ func runStatus(out io.Writer) error {
 	payload := map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage2",
+		"stage":         "core-stage3",
+		"stack":         []string{"cobra", "echo", "gorm", "sqlite"},
 		"config_dir":    must(config.Dir()),
 		"config_path":   must(config.Path()),
+		"db_path":       must(config.DBPath()),
 		"web_host":      settings.WebHost,
 		"web_port":      settings.WebPort,
 		"agent_backend": settings.AgentBackend,
@@ -119,13 +182,13 @@ func runStatus(out io.Writer) error {
 	return json.NewEncoder(out).Encode(payload)
 }
 
-func runDoctor(ctx context.Context, out io.Writer, args []string) error {
+func runDoctor(ctx context.Context, out io.Writer, cmd *cobra.Command) error {
 	settings, err := config.Load()
 	if err != nil {
 		return err
 	}
 	report := health.Run(ctx, settings)
-	asJSON := contains(args, "--json")
+	asJSON, _ := cmd.Flags().GetBool("json")
 	if asJSON {
 		return json.NewEncoder(out).Encode(report)
 	}
@@ -136,43 +199,27 @@ func runDoctor(ctx context.Context, out io.Writer, args []string) error {
 	return nil
 }
 
-func runConfig(out io.Writer, args []string) error {
-	if len(args) == 0 || args[0] == "show" {
-		settings, err := config.Load()
-		if err != nil {
-			return err
-		}
-		settings.OpenAIAPIKey = mask(settings.OpenAIAPIKey)
-		settings.AnthropicAPIKey = mask(settings.AnthropicAPIKey)
-		settings.TelegramBotToken = mask(settings.TelegramBotToken)
-		return json.NewEncoder(out).Encode(settings)
+func runConfigShow(out io.Writer) error {
+	settings, err := config.Load()
+	if err != nil {
+		return err
 	}
+	settings.OpenAIAPIKey = mask(settings.OpenAIAPIKey)
+	settings.AnthropicAPIKey = mask(settings.AnthropicAPIKey)
+	settings.TelegramBotToken = mask(settings.TelegramBotToken)
+	return json.NewEncoder(out).Encode(settings)
+}
 
-	switch args[0] {
-	case "path":
-		fmt.Fprintln(out, must(config.Path()))
-		return nil
-	case "dir":
-		fmt.Fprintln(out, must(config.Dir()))
-		return nil
-	case "init":
-		settings, err := config.Load()
-		if err != nil {
-			return err
-		}
-		if err := config.Save(settings); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, must(config.Path()))
-		return nil
-	case "set":
-		if len(args) < 3 {
-			return errors.New("usage: paw config set <key> <value>")
-		}
-		return configSet(out, args[1], strings.Join(args[2:], " "))
-	default:
-		return fmt.Errorf("unknown config command %q", args[0])
+func runConfigInit(out io.Writer) error {
+	settings, err := config.Load()
+	if err != nil {
+		return err
 	}
+	if err := config.Save(settings); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, must(config.Path()))
+	return nil
 }
 
 func configSet(out io.Writer, key, value string) error {
@@ -215,39 +262,11 @@ func configSet(out io.Writer, key, value string) error {
 	return nil
 }
 
-func printHelp(out io.Writer) {
-	fmt.Fprint(out, `paw - PocketPaw Go core stage 2
-
-Usage:
-  paw                         Start API server
-  paw serve [--host H] [--port P]
-  paw chat [--model MODEL] <prompt>
-  paw ask [--model MODEL] <prompt>
-  paw status                  Print local status as JSON
-  paw doctor [--json]          Run basic health checks
-  paw health [--json]          Alias for doctor
-  paw config [show]            Print masked settings JSON
-  paw config init              Create ~/.pocketpaw/config.json
-  paw config path              Print config path
-  paw config dir               Print config directory
-  paw config set <key> <value> Save a supported config key
-`)
-}
-
 func mask(value string) string {
 	if value == "" {
 		return ""
 	}
 	return "***"
-}
-
-func contains(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func must(value string, err error) string {
