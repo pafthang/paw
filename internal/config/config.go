@@ -13,25 +13,29 @@ const appDirName = ".pocketpaw"
 // Settings intentionally mirrors a small, stable subset of the existing
 // Python config.json so the Go core can run beside the current implementation.
 type Settings struct {
-	WebHost              string   `json:"web_host"`
-	WebPort              int      `json:"web_port"`
-	AgentBackend         string   `json:"agent_backend"`
-	OllamaHost           string   `json:"ollama_host,omitempty"`
-	OpenAIAPIKey         string   `json:"openai_api_key,omitempty"`
-	AnthropicAPIKey      string   `json:"anthropic_api_key,omitempty"`
-	TelegramBotToken     string   `json:"telegram_bot_token,omitempty"`
-	AllowedUserID        int64    `json:"allowed_user_id,omitempty"`
-	HealthCheckOnStartup bool     `json:"health_check_on_startup"`
-	CORSAllowedOrigins   []string `json:"api_cors_allowed_origins,omitempty"`
+	WebHost                 string   `json:"web_host"`
+	WebPort                 int      `json:"web_port"`
+	AgentBackend            string   `json:"agent_backend"`
+	Model                   string   `json:"model,omitempty"`
+	OllamaHost              string   `json:"ollama_host,omitempty"`
+	OpenAICompatibleBaseURL string   `json:"openai_compatible_base_url,omitempty"`
+	OpenAIAPIKey            string   `json:"openai_api_key,omitempty"`
+	AnthropicAPIKey         string   `json:"anthropic_api_key,omitempty"`
+	TelegramBotToken        string   `json:"telegram_bot_token,omitempty"`
+	AllowedUserID           int64    `json:"allowed_user_id,omitempty"`
+	HealthCheckOnStartup    bool     `json:"health_check_on_startup"`
+	CORSAllowedOrigins      []string `json:"api_cors_allowed_origins,omitempty"`
 }
 
 func DefaultSettings() Settings {
 	return Settings{
-		WebHost:              "127.0.0.1",
-		WebPort:              8888,
-		AgentBackend:         "ollama",
-		OllamaHost:           "http://127.0.0.1:11434",
-		HealthCheckOnStartup: true,
+		WebHost:                 "127.0.0.1",
+		WebPort:                 8888,
+		AgentBackend:            "ollama",
+		Model:                   "qwen2.5:7b",
+		OllamaHost:              "http://127.0.0.1:11434",
+		OpenAICompatibleBaseURL: "https://api.openai.com/v1",
+		HealthCheckOnStartup:    true,
 	}
 }
 
@@ -96,8 +100,14 @@ func Load() (Settings, error) {
 	if settings.AgentBackend == "" {
 		settings.AgentBackend = "ollama"
 	}
+	if settings.Model == "" {
+		settings.Model = "qwen2.5:7b"
+	}
 	if settings.OllamaHost == "" {
 		settings.OllamaHost = "http://127.0.0.1:11434"
+	}
+	if settings.OpenAICompatibleBaseURL == "" {
+		settings.OpenAICompatibleBaseURL = "https://api.openai.com/v1"
 	}
 	return settings, nil
 }
