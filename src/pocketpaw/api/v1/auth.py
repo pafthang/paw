@@ -1,0 +1,175 @@
+# Auth router — session exchange, login, logout, QR, token regen.
+# Created: 2026-02-20
+#
+# Extracted from dashboard.py auth endpoints.
+# Updated: 2026-04-09 — use hmac.compare_digest for master-token comparisons
+# to close the timing-oracle gap left open by PR #875 (which only hardened
+# session_tokens.py, missing the raw master-token check sites here).
+
+from __future__ import annotations
+
+import hmac
+import io
+import logging
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from pocketpaw.api.v1.schemas.auth import (
+    SessionTokenResponse,
+    TokenRegenerateResponse,
+)
+from pocketpaw.http_utils import is_request_secure
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Auth"])
+
+
+@router.post("/auth/session", response_model=SessionTokenResponse)
+async def exchange_session_token(request: Request):
+    """Exchange a master access token for a time-limited session token."""
+    from pocketpaw.security.rate_limiter import auth_limiter
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth_limiter.allow(client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+
+    from pocketpaw.config import Settings, get_access_token
+    from pocketpaw.security.session_tokens import create_session_token
+
+    auth_header = request.headers.get("Authorization", "")
+    bearer = (
+        auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
+    )
+    master = get_access_token()
+    if not hmac.compare_digest(bearer, master):
+        raise HTTPException(status_code=401, detail="Invalid master token")
+
+    settings = Settings.load()
+    session_token = create_session_token(master, ttl_hours=settings.session_token_ttl_hours)
+    return SessionTokenResponse(
+        session_token=session_token,
+        expires_in_hours=settings.session_token_ttl_hours,
+    )
+
+
+@router.post("/auth/login")
+async def cookie_login(request: Request):
+    """Validate access token and set an HTTP-only session cookie.
+
+    Accepts master access token, OAuth2 token (ppat_*), or API key (pp_*).
+    """
+    from pocketpaw.security.rate_limiter import auth_limiter
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth_limiter.allow(client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+
+    from pocketpaw.config import Settings, get_access_token
+    from pocketpaw.security.session_tokens import create_session_token
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    submitted = body.get("token", "").strip()
+    master = get_access_token()
+
+    is_valid = hmac.compare_digest(submitted, master)
+    # Accept OAuth2 access tokens (ppat_*)
+    if not is_valid and submitted.startswith("ppat_"):
+        try:
+            from pocketpaw.api.oauth2.server import get_oauth_server
+
+            if get_oauth_server().verify_access_token(submitted) is not None:
+                is_valid = True
+        except Exception:
+            pass
+    # Accept API keys (pp_*)
+    if not is_valid and submitted.startswith("pp_") and not submitted.startswith("ppat_"):
+        try:
+            from pocketpaw.api.api_keys import get_api_key_manager
+
+            if get_api_key_manager().verify(submitted) is not None:
+                is_valid = True
+        except Exception:
+            pass
+
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+
+    settings = Settings.load()
+    session_token = create_session_token(master, ttl_hours=settings.session_token_ttl_hours)
+    max_age = settings.session_token_ttl_hours * 3600
+
+    response = JSONResponse(content={"ok": True})
+    response.set_cookie(
+        key="pocketpaw_session",
+        value=session_token,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        max_age=max_age,
+        secure=is_request_secure(request),
+    )
+    return response
+
+
+@router.post("/auth/logout")
+async def cookie_logout():
+    """Clear the session cookie."""
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie(key="pocketpaw_session", path="/")
+    return response
+
+
+@router.get("/qr")
+async def get_qr_code(request: Request):
+    """Generate QR login code.
+
+    Requires authentication — the caller must already have a valid session.
+    Generates a short-lived (60 s) pairing token embedded in the QR URL.
+    """
+    from pocketpaw.security.rate_limiter import auth_limiter
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth_limiter.allow(client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+
+    import qrcode
+
+    from pocketpaw.config import get_access_token
+    from pocketpaw.security.session_tokens import create_session_token
+    from pocketpaw.tunnel import get_tunnel_manager
+
+    host = request.headers.get("host")
+
+    tunnel = get_tunnel_manager()
+    status = tunnel.get_status()
+
+    # Short-lived pairing token (60 seconds) — scoped to the QR pairing flow
+    qr_token = create_session_token(get_access_token(), ttl_hours=0, ttl_seconds=60)
+
+    if status.get("active") and status.get("url"):
+        login_url = f"{status['url']}/?token={qr_token}"
+    else:
+        protocol = "https" if "trycloudflare" in str(host) else "http"
+        login_url = f"{protocol}://{host}/?token={qr_token}"
+
+    img = qrcode.make(login_url)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+
+    return StreamingResponse(buf, media_type="image/png")
+
+
+@router.post("/token/regenerate", response_model=TokenRegenerateResponse)
+async def regenerate_access_token():
+    """Regenerate access token (invalidates old sessions)."""
+    from pocketpaw.config import regenerate_token
+
+    new_token = regenerate_token()
+    return TokenRegenerateResponse(token=new_token)
