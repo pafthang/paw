@@ -11,6 +11,8 @@ func (s *Server) registerCompatRoutes() {
 
 	e.GET("/api/v1/files/recent", s.handleRecentFiles)
 
+	e.GET("/api/v1/skills/search", s.handleSearchSkills)
+
 	e.GET("/api/v1/identity", s.handleIdentityGet)
 	e.PUT("/api/v1/identity", s.handleIdentityPut)
 
