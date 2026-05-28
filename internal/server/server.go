@@ -48,6 +48,7 @@ func New(settings config.Settings) *Server {
 	e.DELETE("/api/v1/sessions/:id", s.handleDeleteSession)
 	e.GET("/api/v1/tools", s.handleListTools)
 	e.POST("/api/v1/agent/run", s.handleAgentRun)
+	e.POST("/api/v1/agent/chat", s.handleAgentChat)
 	e.GET("/api/v1/audit", s.handleListAudit)
 
 	return s
@@ -79,8 +80,8 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"name":    "paw",
-		"mode":    "go-core-stage4-agent-loop",
-		"message": "PocketPaw Go core agent loop foundation is running.",
+		"mode":    "go-core-agent-tool-calls",
+		"message": "PocketPaw Go core LLM-driven tool call agent is running.",
 		"stack": []string{
 			"cobra",
 			"echo",
@@ -97,6 +98,7 @@ func (s *Server) handleIndex(c echo.Context) error {
 			"DELETE /api/v1/sessions/:id",
 			"GET /api/v1/tools",
 			"POST /api/v1/agent/run",
+			"POST /api/v1/agent/chat",
 			"GET /api/v1/audit",
 		},
 	})
@@ -110,7 +112,7 @@ func (s *Server) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage4-agent-loop",
+		"stage":         "agent-tool-calls",
 		"web_host":      s.settings.WebHost,
 		"web_port":      s.settings.WebPort,
 		"agent_backend": s.settings.AgentBackend,
