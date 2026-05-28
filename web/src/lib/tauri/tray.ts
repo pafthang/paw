@@ -5,7 +5,12 @@
 
 let listenFn: typeof import("@tauri-apps/api/event").listen | null = null;
 
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 async function getListen() {
+  if (!isTauri()) return null;
   if (listenFn) return listenFn;
   try {
     const mod = await import("@tauri-apps/api/event");
