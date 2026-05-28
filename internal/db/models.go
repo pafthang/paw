@@ -27,3 +27,14 @@ type MemoryItem struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type AuditEvent struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	SessionID uint      `gorm:"index" json:"session_id,omitempty"`
+	Type      string    `gorm:"index" json:"type"`
+	ToolName  string    `gorm:"index" json:"tool_name,omitempty"`
+	InputJSON string    `json:"input_json,omitempty"`
+	OutputJSON string   `json:"output_json,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}

@@ -11,12 +11,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pafthang/paw/internal/agent"
 	"github.com/pafthang/paw/internal/config"
 	"github.com/pafthang/paw/internal/contextpack"
 	"github.com/pafthang/paw/internal/db"
 	"github.com/pafthang/paw/internal/health"
 	"github.com/pafthang/paw/internal/llm"
 	"github.com/pafthang/paw/internal/server"
+	"github.com/pafthang/paw/internal/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -38,9 +40,9 @@ func newRootCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	}
 	root.SetOut(out)
 	root.SetErr(os.Stderr)
-	root.Version = "go-core-stage6"
+	root.Version = "go-core-stage4-agent-loop"
 
-	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out), newSessionsCommand(out))
+	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out), newSessionsCommand(out), newToolsCommand(out), newRunToolCommand(ctx, out), newAuditCommand(out))
 	root.AddCommand(&cobra.Command{
 		Use:   "ask [prompt]",
 		Short: "Alias for chat",
@@ -134,6 +136,32 @@ func newSessionsCommand(out io.Writer) *cobra.Command {
 	return cmd
 }
 
+func newToolsCommand(out io.Writer) *cobra.Command {
+	return &cobra.Command{Use: "tools", Short: "List available agent tools", RunE: func(cmd *cobra.Command, args []string) error {
+		return json.NewEncoder(out).Encode(tools.DefaultRegistry().List())
+	}}
+}
+
+func newRunToolCommand(ctx context.Context, out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{Use: "run-tool <name>", Short: "Run one agent tool and audit it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		input, _ := cmd.Flags().GetString("input")
+		sessionID, _ := cmd.Flags().GetUint("session")
+		return runTool(ctx, out, args[0], input, sessionID)
+	}}
+	cmd.Flags().String("input", "{}", "tool input JSON")
+	cmd.Flags().Uint("session", 0, "optional session id for audit")
+	return cmd
+}
+
+func newAuditCommand(out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{Use: "audit", Short: "Inspect audit events", RunE: func(cmd *cobra.Command, args []string) error { return runAuditList(out, cmd) }}
+	list := &cobra.Command{Use: "list", Short: "List audit events", RunE: func(cmd *cobra.Command, args []string) error { return runAuditList(out, cmd) }}
+	list.Flags().Int("limit", 50, "maximum audit events to show")
+	cmd.Flags().Int("limit", 50, "maximum audit events to show")
+	cmd.AddCommand(list)
+	return cmd
+}
+
 func runServe(ctx context.Context, cmd *cobra.Command, args []string) error {
 	settings, err := config.Load()
 	if err != nil {
@@ -215,6 +243,36 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 	return nil
 }
 
+func runTool(ctx context.Context, out io.Writer, name string, input string, sessionID uint) error {
+	var raw json.RawMessage = json.RawMessage(input)
+	if !json.Valid(raw) {
+		return fmt.Errorf("invalid input JSON")
+	}
+	database, err := db.Open()
+	if err != nil {
+		return err
+	}
+	runner := agent.NewRunner(database, tools.DefaultRegistry())
+	resp, err := runner.Run(ctx, agent.RunRequest{SessionID: sessionID, ToolCalls: []agent.ToolCall{{Name: name, Input: raw}}})
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(resp)
+}
+
+func runAuditList(out io.Writer, cmd *cobra.Command) error {
+	limit, _ := cmd.Flags().GetInt("limit")
+	database, err := db.Open()
+	if err != nil {
+		return err
+	}
+	events, err := db.ListAuditEvents(database, limit)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(events)
+}
+
 func runStatus(out io.Writer) error {
 	settings, err := config.Load()
 	if err != nil {
@@ -223,7 +281,7 @@ func runStatus(out io.Writer) error {
 	payload := map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage6",
+		"stage":         "core-stage4-agent-loop",
 		"stack":         []string{"cobra", "echo", "gorm", "sqlite"},
 		"config_dir":    must(config.Dir()),
 		"config_path":   must(config.Path()),

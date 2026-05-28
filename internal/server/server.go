@@ -46,6 +46,9 @@ func New(settings config.Settings) *Server {
 	e.GET("/api/v1/sessions", s.handleListSessions)
 	e.GET("/api/v1/sessions/:id", s.handleGetSession)
 	e.DELETE("/api/v1/sessions/:id", s.handleDeleteSession)
+	e.GET("/api/v1/tools", s.handleListTools)
+	e.POST("/api/v1/agent/run", s.handleAgentRun)
+	e.GET("/api/v1/audit", s.handleListAudit)
 
 	return s
 }
@@ -76,8 +79,8 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"name":    "paw",
-		"mode":    "go-core-stage6",
-		"message": "PocketPaw Go core stage 6 is running.",
+		"mode":    "go-core-stage4-agent-loop",
+		"message": "PocketPaw Go core agent loop foundation is running.",
 		"stack": []string{
 			"cobra",
 			"echo",
@@ -92,6 +95,9 @@ func (s *Server) handleIndex(c echo.Context) error {
 			"GET /api/v1/sessions",
 			"GET /api/v1/sessions/:id",
 			"DELETE /api/v1/sessions/:id",
+			"GET /api/v1/tools",
+			"POST /api/v1/agent/run",
+			"GET /api/v1/audit",
 		},
 	})
 }
@@ -104,7 +110,7 @@ func (s *Server) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage6",
+		"stage":         "core-stage4-agent-loop",
 		"web_host":      s.settings.WebHost,
 		"web_port":      s.settings.WebPort,
 		"agent_backend": s.settings.AgentBackend,
