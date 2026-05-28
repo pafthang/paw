@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 	"github.com/pafthang/paw/internal/db"
@@ -24,11 +25,7 @@ func (s *Server) handleCreateSession(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{
-		"id":    stringID(session.ID),
+		"id":    strconv.FormatUint(uint64(session.ID), 10),
 		"title": session.Title,
 	})
-}
-
-func stringID(id uint) string {
-	return fmt.Sprintf("%d", id)
 }
