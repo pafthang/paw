@@ -97,15 +97,30 @@ Request:
 }
 ```
 
-Events:
+Events without tools:
 
 ```json
 {"id":"agent-1","type":"agent.started","session_id":1}
+{"id":"agent-1","type":"agent.result","response":{...}}
+```
+
+Events with tools:
+
+```json
+{"id":"agent-1","type":"agent.started","session_id":1}
+{"id":"agent-1","type":"agent.tool.started","index":0,"tool_name":"file.read","call":{...}}
+{"id":"agent-1","type":"agent.tool.result","index":0,"tool_name":"file.read","result":{...}}
 {"id":"agent-1","type":"agent.tools","tool_calls":[...],"tool_run_response":{...}}
 {"id":"agent-1","type":"agent.result","response":{...}}
 ```
 
-If no tools are used, Paw skips `agent.tools` and sends only `agent.result`.
+If a tool fails, Paw emits:
+
+```json
+{"id":"agent-1","type":"agent.tool.error","index":0,"tool_name":"shell.run","result":{"error":"..."}}
+```
+
+`agent.tools` is still emitted as a summary event after all tool calls finish.
 
 ## Error events
 
@@ -123,5 +138,5 @@ Errors are returned as:
 ## Next steps
 
 - stream partial model output when provider supports streaming
-- emit finer-grained agent events: `tool.started`, `tool.result`, `tool.error`
+- add multiple agent iterations
 - add session subscriptions
