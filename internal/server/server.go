@@ -239,6 +239,7 @@ func (s *Server) handleChat(c echo.Context) error {
 	if len(incomingMessages) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "prompt or messages is required"})
 	}
+
 	database, err := db.Open()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -248,7 +249,7 @@ func (s *Server) handleChat(c echo.Context) error {
 	if req.SessionID > 0 {
 		session, err = db.GetChatSession(database, req.SessionID)
 		if err != nil {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 		historyLimit := req.HistoryLimit
 		if historyLimit == 0 {
@@ -266,9 +267,10 @@ func (s *Server) handleChat(c echo.Context) error {
 		}
 	}
 	messages := contextpack.Pack(req.SystemPrompt, history, incomingMessages, req.MaxContextChars)
+
 	client, err := llm.NewClient(s.settings)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	resp, err := client.Chat(c.Request().Context(), llm.ChatRequest{Model: model, Messages: messages})
 	if err != nil {
@@ -282,6 +284,7 @@ func (s *Server) handleChat(c echo.Context) error {
 	if _, err := db.AddChatMessage(database, session.ID, "assistant", resp.Content, resp.Model); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+
 	return c.JSON(http.StatusOK, map[string]any{
 		"session_id":       session.ID,
 		"history_messages": len(messages) - len(incomingMessages) - 1,
@@ -290,7 +293,84 @@ func (s *Server) handleChat(c echo.Context) error {
 	})
 }
 
+func (s *Server) handleListSessions(c echo.Context) error {
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	sessions, err := db.ListChatSessions(database, limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, sessions)
+}
+
+func (s *Server) handleGetSession(c echo.Context) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+	}
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	session, err := db.GetChatSession(database, uint(id))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, session)
+}
+
+func (s *Server) handleDeleteSession(c echo.Context) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+	}
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if err := db.DeleteChatSession(database, uint(id)); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"deleted": true, "id": id})
+}
+
 func parseUintParam(c echo.Context, name string) (uint, error) {
 	parsed, err := strconv.ParseUint(c.Param(name), 10, 64)
 	return uint(parsed), err
+}
+
+func firstUserContent(messages []llm.Message) string {
+	for _, message := range messages {
+		if message.Role == "user" && message.Content != "" {
+			return message.Content
+		}
+	}
+	if len(messages) > 0 {
+		return messages[0].Content
+	}
+	return "New chat"
+}
+
+func toLLMMessages(messages []db.ChatMessage) []llm.Message {
+	out := make([]llm.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == "" || message.Content == "" {
+			continue
+		}
+		out = append(out, llm.Message{Role: message.Role, Content: message.Content})
+	}
+	return out
+}
+
+func securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		res := c.Response()
+		res.Header().Set("X-Content-Type-Options", "nosniff")
+		res.Header().Set("X-Frame-Options", "DENY")
+		res.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		return next(c)
+	}
 }
