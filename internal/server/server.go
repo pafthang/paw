@@ -75,8 +75,8 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"name":    "paw",
-		"mode":    "go-core-stage4",
-		"message": "PocketPaw Go core stage 4 is running.",
+		"mode":    "go-core-stage5",
+		"message": "PocketPaw Go core stage 5 is running.",
 		"stack": []string{
 			"cobra",
 			"echo",
@@ -103,7 +103,7 @@ func (s *Server) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage4",
+		"stage":         "core-stage5",
 		"web_host":      s.settings.WebHost,
 		"web_port":      s.settings.WebPort,
 		"agent_backend": s.settings.AgentBackend,
@@ -128,10 +128,11 @@ func (s *Server) handleSettings(c echo.Context) error {
 
 func (s *Server) handleChat(c echo.Context) error {
 	var req struct {
-		Model     string        `json:"model,omitempty"`
-		Prompt    string        `json:"prompt,omitempty"`
-		Messages  []llm.Message `json:"messages,omitempty"`
-		SessionID uint          `json:"session_id,omitempty"`
+		Model        string        `json:"model,omitempty"`
+		Prompt       string        `json:"prompt,omitempty"`
+		Messages     []llm.Message `json:"messages,omitempty"`
+		SessionID    uint          `json:"session_id,omitempty"`
+		HistoryLimit int           `json:"history_limit,omitempty"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
@@ -140,13 +141,42 @@ func (s *Server) handleChat(c echo.Context) error {
 	if model == "" {
 		model = llm.DefaultModel(s.settings)
 	}
-	messages := req.Messages
-	if len(messages) == 0 && req.Prompt != "" {
-		messages = []llm.Message{{Role: "user", Content: req.Prompt}}
+	incomingMessages := req.Messages
+	if len(incomingMessages) == 0 && req.Prompt != "" {
+		incomingMessages = []llm.Message{{Role: "user", Content: req.Prompt}}
 	}
-	if len(messages) == 0 {
+	if len(incomingMessages) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "prompt or messages is required"})
 	}
+
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	var session *db.ChatSession
+	messages := make([]llm.Message, 0, len(incomingMessages)+db.DefaultHistoryLimit)
+	if req.SessionID > 0 {
+		session, err = db.GetChatSession(database, req.SessionID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		historyLimit := req.HistoryLimit
+		if historyLimit == 0 {
+			historyLimit = db.DefaultHistoryLimit
+		}
+		recent, err := db.ListRecentChatMessages(database, session.ID, historyLimit)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		messages = append(messages, toLLMMessages(recent)...)
+	} else {
+		session, err = db.CreateChatSession(database, firstUserContent(incomingMessages))
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+	}
+	messages = append(messages, incomingMessages...)
+
 	client, err := llm.NewClient(s.settings)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -155,21 +185,7 @@ func (s *Server) handleChat(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
-
-	database, err := db.Open()
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-	var session *db.ChatSession
-	if req.SessionID > 0 {
-		session, err = db.GetChatSession(database, req.SessionID)
-	} else {
-		session, err = db.CreateChatSession(database, firstUserContent(messages))
-	}
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-	for _, message := range messages {
+	for _, message := range incomingMessages {
 		if _, err := db.AddChatMessage(database, session.ID, message.Role, message.Content, model); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
@@ -178,7 +194,7 @@ func (s *Server) handleChat(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"session_id": session.ID, "response": resp})
+	return c.JSON(http.StatusOK, map[string]any{"session_id": session.ID, "history_messages": len(messages) - len(incomingMessages), "response": resp})
 }
 
 func (s *Server) handleListSessions(c echo.Context) error {
@@ -235,6 +251,17 @@ func firstUserContent(messages []llm.Message) string {
 		return messages[0].Content
 	}
 	return "New chat"
+}
+
+func toLLMMessages(messages []db.ChatMessage) []llm.Message {
+	out := make([]llm.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == "" || message.Content == "" {
+			continue
+		}
+		out = append(out, llm.Message{Role: message.Role, Content: message.Content})
+	}
+	return out
 }
 
 func securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
