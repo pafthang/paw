@@ -50,7 +50,9 @@ Response:
 
 ## Chat
 
-Request:
+WebSocket `chat` uses the same session persistence and context packing path as the HTTP chat endpoint.
+
+Create a new session:
 
 ```json
 {
@@ -61,14 +63,25 @@ Request:
 }
 ```
 
+Continue an existing session:
+
+```json
+{
+  "id": "chat-2",
+  "type": "chat",
+  "session_id": 1,
+  "history_limit": 20,
+  "max_context_chars": 8000,
+  "prompt": "Continue from the previous answer."
+}
+```
+
 Events:
 
 ```json
-{"id":"chat-1","type":"chat.started"}
-{"id":"chat-1","type":"chat.result","response":{"model":"...","content":"..."}}
+{"id":"chat-1","type":"chat.started","session_id":0}
+{"id":"chat-1","type":"chat.result","session_id":1,"history_messages":0,"context":{"messages":2,"chars":1234},"response":{"model":"...","content":"..."}}
 ```
-
-Current note: websocket `chat` is a lightweight LLM call and does not yet persist sessions. Use `agent.chat` for session-aware agent runs.
 
 ## Agent chat
 
@@ -84,15 +97,30 @@ Request:
 }
 ```
 
-Events:
+Events without tools:
 
 ```json
 {"id":"agent-1","type":"agent.started","session_id":1}
+{"id":"agent-1","type":"agent.result","response":{...}}
+```
+
+Events with tools:
+
+```json
+{"id":"agent-1","type":"agent.started","session_id":1}
+{"id":"agent-1","type":"agent.tool.started","index":0,"tool_name":"file.read","call":{...}}
+{"id":"agent-1","type":"agent.tool.result","index":0,"tool_name":"file.read","result":{...}}
 {"id":"agent-1","type":"agent.tools","tool_calls":[...],"tool_run_response":{...}}
 {"id":"agent-1","type":"agent.result","response":{...}}
 ```
 
-If no tools are used, Paw skips `agent.tools` and sends only `agent.result`.
+If a tool fails, Paw emits:
+
+```json
+{"id":"agent-1","type":"agent.tool.error","index":0,"tool_name":"shell.run","result":{"error":"..."}}
+```
+
+`agent.tools` is still emitted as a summary event after all tool calls finish.
 
 ## Error events
 
@@ -109,7 +137,6 @@ Errors are returned as:
 
 ## Next steps
 
-- persist websocket `chat` sessions
 - stream partial model output when provider supports streaming
-- emit finer-grained agent events: `tool.started`, `tool.result`, `tool.error`
+- add multiple agent iterations
 - add session subscriptions

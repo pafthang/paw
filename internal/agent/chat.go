@@ -34,12 +34,13 @@ You have just received tool results. Use them to answer the user's original requ
 Do not emit more tool_calls JSON in this final answer. Be concise and practical.`
 
 type ChatRequest struct {
-	SessionID       uint   `json:"session_id,omitempty"`
-	Prompt          string `json:"prompt"`
-	Model           string `json:"model,omitempty"`
-	HistoryLimit    int    `json:"history_limit,omitempty"`
-	MaxContextChars int    `json:"max_context_chars,omitempty"`
-	SystemPrompt    string `json:"system_prompt,omitempty"`
+	SessionID       uint     `json:"session_id,omitempty"`
+	Prompt          string   `json:"prompt"`
+	Model           string   `json:"model,omitempty"`
+	HistoryLimit    int      `json:"history_limit,omitempty"`
+	MaxContextChars int      `json:"max_context_chars,omitempty"`
+	SystemPrompt    string   `json:"system_prompt,omitempty"`
+	OnTool          ToolHook `json:"-"`
 }
 
 type ChatResponse struct {
@@ -82,7 +83,7 @@ func (r *Runner) Chat(ctx context.Context, client llm.Client, req ChatRequest) (
 	var runResp RunResponse
 	finalResp := modelResp
 	if len(calls) > 0 {
-		runResp, err = r.Run(ctx, RunRequest{SessionID: session.ID, ToolCalls: calls})
+		runResp, err = r.Run(ctx, RunRequest{SessionID: session.ID, ToolCalls: calls, OnTool: req.OnTool})
 		if err != nil {
 			return ChatResponse{}, err
 		}
