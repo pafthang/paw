@@ -3,6 +3,10 @@ package server
 func (s *Server) registerCompatRoutes() {
 	e := s.echo
 
+	e.GET("/api/v1/backends", s.handleListBackends)
+	e.GET("/api/v1/backends/ollama-models", s.handleFetchOllamaModels)
+	e.GET("/api/v1/version", s.handleVersion)
+
 	e.POST("/api/v1/health/check", s.handleHealthCompat)
 	e.GET("/api/v1/health/errors", s.handleHealthErrors)
 	e.DELETE("/api/v1/health/errors", s.handleClearHealthErrors)
@@ -16,6 +20,9 @@ func (s *Server) registerCompatRoutes() {
 	e.GET("/api/v1/files/recent", s.handleRecentFiles)
 
 	e.GET("/api/v1/skills/search", s.handleSearchSkills)
+
+	e.GET("/api/v1/mcp/presets", s.handleMCPPresets)
+	e.POST("/api/v1/mcp/presets/install", s.handleMCPInstallPreset)
 
 	e.GET("/api/v1/identity", s.handleIdentityGet)
 	e.PUT("/api/v1/identity", s.handleIdentityPut)
