@@ -17,7 +17,6 @@ import (
 	"github.com/pafthang/paw/internal/config"
 	"github.com/pafthang/paw/internal/contextpack"
 	"github.com/pafthang/paw/internal/db"
-	"github.com/pafthang/paw/internal/health"
 	"github.com/pafthang/paw/internal/llm"
 )
 
@@ -193,7 +192,7 @@ func (s *Server) handleIndex(c echo.Context) error {
 }
 
 func (s *Server) handleHealth(c echo.Context) error {
-	return c.JSON(http.StatusOK, health.Run(c.Request().Context(), s.settings))
+	return s.handleHealthCompat(c)
 }
 
 func (s *Server) handleStatus(c echo.Context) error {

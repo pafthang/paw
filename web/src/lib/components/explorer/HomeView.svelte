@@ -79,30 +79,34 @@
 
 <div class="space-y-6 overflow-y-auto p-5">
   <!-- Recents -->
-  {#if recentFiles.length > 0}
-    <section>
-      <h2 class="mb-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-        Recent
-      </h2>
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2">
-        {#each recentFiles as entry}
-          <button
-            type="button"
-            class="flex items-center gap-2.5 rounded-lg border border-border/50 bg-card/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
-            onclick={() => openRecent(entry)}
-          >
-            <div class="flex h-5 w-5 shrink-0 items-center justify-center">
-              <StyledFileIcon extension={entry.extension} isDir={entry.is_dir} size={20} />
-            </div>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm text-foreground">{entry.name}</p>
-              <p class="truncate text-[11px] text-muted-foreground/60">{formatRelativeTime(entry.timestamp)}</p>
-            </div>
-          </button>
-        {/each}
-      </div>
-    </section>
-  {/if}
+{#if (recentFiles ?? []).length > 0}
+  <section>
+    <h2 class="mb-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+      Recent
+    </h2>
+
+    <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2">
+      {#each recentFiles ?? [] as entry}
+        <button
+          type="button"
+          class="flex items-center gap-2.5 rounded-lg border border-border/50 bg-card/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
+          onclick={() => openRecent(entry)}
+        >
+          <div class="flex h-5 w-5 shrink-0 items-center justify-center">
+            <StyledFileIcon extension={entry.extension} isDir={entry.is_dir} size={20} />
+          </div>
+
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm text-foreground">{entry.name}</p>
+            <p class="truncate text-[11px] text-muted-foreground/60">
+              {formatRelativeTime(entry.timestamp)}
+            </p>
+          </div>
+        </button>
+      {/each}
+    </div>
+  </section>
+{/if}
 
   <!-- Pinned -->
   {#if explorerStore.pinnedFolders.length > 0}

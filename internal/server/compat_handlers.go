@@ -238,7 +238,9 @@ func (s *Server) handleMCCreateTask(c echo.Context) error {
 }
 
 func (s *Server) handleMCUpdateTaskStatus(c echo.Context) error {
-	var req struct{ Status string `json:"status"` }
+	var req struct {
+		Status string `json:"status"`
+	}
 	if err := c.Bind(&req); err != nil || req.Status == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"detail": "status is required"})
 	}
@@ -329,7 +331,7 @@ func (s *Server) handleMCMarkNotificationRead(c echo.Context) error {
 }
 
 func statusFromErr(err error) int {
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, oos.ErrNotExist) {
 		return http.StatusNotFound
 	}
 	return http.StatusInternalServerError

@@ -72,13 +72,15 @@
 <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
   <!-- Quick Access -->
   <SidebarSection title="Quick Access">
-    {#if recentFiles.length > 0}
-      <button type="button" class={itemClasses(isHome)} onclick={() => explorerStore.goHome()}>
-        <Clock class="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-        <span class="truncate">Recent Files</span>
-        <span class="ml-auto text-[10px] text-muted-foreground/50">{recentFiles.length}</span>
-      </button>
-    {/if}
+{#if (recentFiles ?? []).length > 0}
+  <button type="button" class={itemClasses(isHome)} onclick={() => explorerStore.goHome()}>
+    <Clock class="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+    <span class="truncate">Recent Files</span>
+    <span class="ml-auto text-[10px] text-muted-foreground/50">
+      {(recentFiles ?? []).length}
+    </span>
+  </button>
+{/if}
 
     {#if pinnedFolders.length > 0}
       {#each pinnedFolders as folder (folder.path)}

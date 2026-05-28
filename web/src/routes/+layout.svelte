@@ -146,7 +146,7 @@
 
     if (!isTauri()) {
       // Browser dev fallback — skip backend check entirely
-      const token = "dev-token";
+      const token = "06bcce0b4dabff90a4fc89b2a9cf31f0625dfff0cbdda436f55f401f54076aae";
       await initializeStores(token);
       authState = "authenticated";
       finishSetup();
