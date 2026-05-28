@@ -37,7 +37,7 @@ func newRootCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	}
 	root.SetOut(out)
 	root.SetErr(os.Stderr)
-	root.Version = "go-core-stage4"
+	root.Version = "go-core-stage5"
 
 	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out), newSessionsCommand(out))
 	root.AddCommand(&cobra.Command{
@@ -70,6 +70,7 @@ func newChatCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	cmd.Flags().String("model", "", "model to use")
 	cmd.Flags().Bool("json", false, "print JSON response")
 	cmd.Flags().Uint("session", 0, "append to an existing session id")
+	cmd.Flags().Int("history-limit", db.DefaultHistoryLimit, "max previous session messages to include as LLM context")
 	return cmd
 }
 
@@ -155,17 +156,10 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 	}
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	sessionID, _ := cmd.Flags().GetUint("session")
+	historyLimit, _ := cmd.Flags().GetInt("history-limit")
 	prompt := strings.TrimSpace(strings.Join(args, " "))
 	if prompt == "" {
-		return errors.New("usage: paw chat [--model MODEL] [--session ID] <prompt>")
-	}
-	client, err := llm.NewClient(settings)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Chat(ctx, llm.ChatRequest{Model: model, Messages: []llm.Message{{Role: "user", Content: prompt}}})
-	if err != nil {
-		return err
+		return errors.New("usage: paw chat [--model MODEL] [--session ID] [--history-limit N] <prompt>")
 	}
 
 	database, err := db.Open()
@@ -173,11 +167,30 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 		return err
 	}
 	var session *db.ChatSession
+	var messages []llm.Message
 	if sessionID > 0 {
 		session, err = db.GetChatSession(database, uint(sessionID))
+		if err != nil {
+			return err
+		}
+		recent, err := db.ListRecentChatMessages(database, session.ID, historyLimit)
+		if err != nil {
+			return err
+		}
+		messages = append(messages, toLLMMessages(recent)...)
 	} else {
 		session, err = db.CreateChatSession(database, prompt)
+		if err != nil {
+			return err
+		}
 	}
+	messages = append(messages, llm.Message{Role: "user", Content: prompt})
+
+	client, err := llm.NewClient(settings)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Chat(ctx, llm.ChatRequest{Model: model, Messages: messages})
 	if err != nil {
 		return err
 	}
@@ -189,9 +202,9 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 	}
 
 	if jsonOut {
-		return json.NewEncoder(out).Encode(map[string]any{"session_id": session.ID, "response": resp})
+		return json.NewEncoder(out).Encode(map[string]any{"session_id": session.ID, "history_messages": len(messages) - 1, "response": resp})
 	}
-	fmt.Fprintf(out, "%s\n\n[session:%d]\n", resp.Content, session.ID)
+	fmt.Fprintf(out, "%s\n\n[session:%d history:%d]\n", resp.Content, session.ID, len(messages)-1)
 	return nil
 }
 
@@ -203,7 +216,7 @@ func runStatus(out io.Writer) error {
 	payload := map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage4",
+		"stage":         "core-stage5",
 		"stack":         []string{"cobra", "echo", "gorm", "sqlite"},
 		"config_dir":    must(config.Dir()),
 		"config_path":   must(config.Path()),
@@ -339,6 +352,17 @@ func configSet(out io.Writer, key, value string) error {
 	}
 	fmt.Fprintf(out, "saved %s\n", key)
 	return nil
+}
+
+func toLLMMessages(messages []db.ChatMessage) []llm.Message {
+	out := make([]llm.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == "" || message.Content == "" {
+			continue
+		}
+		out = append(out, llm.Message{Role: message.Role, Content: message.Content})
+	}
+	return out
 }
 
 func mask(value string) string {

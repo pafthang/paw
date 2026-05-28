@@ -8,6 +8,9 @@ import (
 
 const defaultSessionLimit = 50
 
+const DefaultHistoryLimit = 20
+const MaxHistoryLimit = 100
+
 func CreateChatSession(database *gorm.DB, title string) (*ChatSession, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -42,6 +45,32 @@ func ListChatSessions(database *gorm.DB, limit int) ([]ChatSession, error) {
 		return nil, err
 	}
 	return sessions, nil
+}
+
+func ListRecentChatMessages(database *gorm.DB, sessionID uint, limit int) ([]ChatMessage, error) {
+	if limit < 0 {
+		limit = 0
+	}
+	if limit == 0 {
+		return []ChatMessage{}, nil
+	}
+	if limit > MaxHistoryLimit {
+		limit = MaxHistoryLimit
+	}
+
+	var newestFirst []ChatMessage
+	if err := database.Where("chat_session_id = ?", sessionID).
+		Order("created_at desc, id desc").
+		Limit(limit).
+		Find(&newestFirst).Error; err != nil {
+		return nil, err
+	}
+
+	messages := make([]ChatMessage, len(newestFirst))
+	for i := range newestFirst {
+		messages[len(newestFirst)-1-i] = newestFirst[i]
+	}
+	return messages, nil
 }
 
 func AddChatMessage(database *gorm.DB, sessionID uint, role, content, model string) (*ChatMessage, error) {
