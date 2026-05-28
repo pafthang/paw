@@ -5,7 +5,12 @@
 
 let shortcutModule: typeof import("@tauri-apps/plugin-global-shortcut") | null = null;
 
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 async function getModule() {
+  if (!isTauri()) return null;
   if (shortcutModule) return shortcutModule;
   try {
     shortcutModule = await import("@tauri-apps/plugin-global-shortcut");
