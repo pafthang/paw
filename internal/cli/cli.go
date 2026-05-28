@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pafthang/paw/internal/config"
@@ -36,15 +37,14 @@ func newRootCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	}
 	root.SetOut(out)
 	root.SetErr(os.Stderr)
-	root.Version = "go-core-stage3"
+	root.Version = "go-core-stage4"
 
-	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out))
+	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out), newSessionsCommand(out))
 	root.AddCommand(&cobra.Command{
-		Use:     "ask [prompt]",
-		Short:   "Alias for chat",
-		Args:    cobra.MinimumNArgs(1),
-		RunE:    func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) },
-		PreRunE: func(cmd *cobra.Command, args []string) error { return nil },
+		Use:   "ask [prompt]",
+		Short: "Alias for chat",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) },
 	})
 	return root
 }
@@ -62,13 +62,14 @@ func newServeCommand(ctx context.Context) *cobra.Command {
 
 func newChatCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "chat [prompt]",
-		Short:   "Send a prompt to the configured LLM",
-		Args:    cobra.MinimumNArgs(1),
-		RunE:    func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) },
+		Use:   "chat [prompt]",
+		Short: "Send a prompt to the configured LLM and save the exchange",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) },
 	}
 	cmd.Flags().String("model", "", "model to use")
 	cmd.Flags().Bool("json", false, "print JSON response")
+	cmd.Flags().Uint("session", 0, "append to an existing session id")
 	return cmd
 }
 
@@ -118,6 +119,17 @@ func newDBCommand(out io.Writer) *cobra.Command {
 	return cmd
 }
 
+func newSessionsCommand(out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{Use: "sessions", Short: "Inspect saved chat sessions", RunE: func(cmd *cobra.Command, args []string) error { return runSessionsList(out, cmd) }}
+	list := &cobra.Command{Use: "list", Short: "List saved sessions", RunE: func(cmd *cobra.Command, args []string) error { return runSessionsList(out, cmd) }}
+	list.Flags().Int("limit", 20, "maximum sessions to show")
+	show := &cobra.Command{Use: "show <id>", Short: "Show one saved session", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runSessionsShow(out, args[0]) }}
+	deleteCmd := &cobra.Command{Use: "delete <id>", Short: "Delete one saved session", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runSessionsDelete(out, args[0]) }}
+	cmd.AddCommand(list, show, deleteCmd)
+	cmd.Flags().Int("limit", 20, "maximum sessions to show")
+	return cmd
+}
+
 func runServe(ctx context.Context, cmd *cobra.Command, args []string) error {
 	settings, err := config.Load()
 	if err != nil {
@@ -142,9 +154,10 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 		model = llm.DefaultModel(settings)
 	}
 	jsonOut, _ := cmd.Flags().GetBool("json")
+	sessionID, _ := cmd.Flags().GetUint("session")
 	prompt := strings.TrimSpace(strings.Join(args, " "))
 	if prompt == "" {
-		return errors.New("usage: paw chat [--model MODEL] <prompt>")
+		return errors.New("usage: paw chat [--model MODEL] [--session ID] <prompt>")
 	}
 	client, err := llm.NewClient(settings)
 	if err != nil {
@@ -154,10 +167,31 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 	if err != nil {
 		return err
 	}
-	if jsonOut {
-		return json.NewEncoder(out).Encode(resp)
+
+	database, err := db.Open()
+	if err != nil {
+		return err
 	}
-	fmt.Fprintln(out, resp.Content)
+	var session *db.ChatSession
+	if sessionID > 0 {
+		session, err = db.GetChatSession(database, uint(sessionID))
+	} else {
+		session, err = db.CreateChatSession(database, prompt)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := db.AddChatMessage(database, session.ID, "user", prompt, model); err != nil {
+		return err
+	}
+	if _, err := db.AddChatMessage(database, session.ID, "assistant", resp.Content, resp.Model); err != nil {
+		return err
+	}
+
+	if jsonOut {
+		return json.NewEncoder(out).Encode(map[string]any{"session_id": session.ID, "response": resp})
+	}
+	fmt.Fprintf(out, "%s\n\n[session:%d]\n", resp.Content, session.ID)
 	return nil
 }
 
@@ -169,7 +203,7 @@ func runStatus(out io.Writer) error {
 	payload := map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage3",
+		"stage":         "core-stage4",
 		"stack":         []string{"cobra", "echo", "gorm", "sqlite"},
 		"config_dir":    must(config.Dir()),
 		"config_path":   must(config.Path()),
@@ -196,6 +230,51 @@ func runDoctor(ctx context.Context, out io.Writer, cmd *cobra.Command) error {
 	for _, check := range report.Checks {
 		fmt.Fprintf(out, "[%s] %s: %s\n", strings.ToUpper(check.Status), check.Name, check.Message)
 	}
+	return nil
+}
+
+func runSessionsList(out io.Writer, cmd *cobra.Command) error {
+	limit, _ := cmd.Flags().GetInt("limit")
+	database, err := db.Open()
+	if err != nil {
+		return err
+	}
+	sessions, err := db.ListChatSessions(database, limit)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(sessions)
+}
+
+func runSessionsShow(out io.Writer, rawID string) error {
+	id, err := strconv.ParseUint(rawID, 10, 64)
+	if err != nil || id == 0 {
+		return fmt.Errorf("invalid session id %q", rawID)
+	}
+	database, err := db.Open()
+	if err != nil {
+		return err
+	}
+	session, err := db.GetChatSession(database, uint(id))
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(session)
+}
+
+func runSessionsDelete(out io.Writer, rawID string) error {
+	id, err := strconv.ParseUint(rawID, 10, 64)
+	if err != nil || id == 0 {
+		return fmt.Errorf("invalid session id %q", rawID)
+	}
+	database, err := db.Open()
+	if err != nil {
+		return err
+	}
+	if err := db.DeleteChatSession(database, uint(id)); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "deleted session %d\n", id)
 	return nil
 }
 
