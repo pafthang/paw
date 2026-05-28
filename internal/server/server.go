@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pafthang/paw/internal/config"
+	"github.com/pafthang/paw/internal/contextpack"
 	"github.com/pafthang/paw/internal/db"
 	"github.com/pafthang/paw/internal/health"
 	"github.com/pafthang/paw/internal/llm"
@@ -75,8 +76,8 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"name":    "paw",
-		"mode":    "go-core-stage5",
-		"message": "PocketPaw Go core stage 5 is running.",
+		"mode":    "go-core-stage6",
+		"message": "PocketPaw Go core stage 6 is running.",
 		"stack": []string{
 			"cobra",
 			"echo",
@@ -103,7 +104,7 @@ func (s *Server) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage5",
+		"stage":         "core-stage6",
 		"web_host":      s.settings.WebHost,
 		"web_port":      s.settings.WebPort,
 		"agent_backend": s.settings.AgentBackend,
@@ -128,11 +129,13 @@ func (s *Server) handleSettings(c echo.Context) error {
 
 func (s *Server) handleChat(c echo.Context) error {
 	var req struct {
-		Model        string        `json:"model,omitempty"`
-		Prompt       string        `json:"prompt,omitempty"`
-		Messages     []llm.Message `json:"messages,omitempty"`
-		SessionID    uint          `json:"session_id,omitempty"`
-		HistoryLimit int           `json:"history_limit,omitempty"`
+		Model           string        `json:"model,omitempty"`
+		Prompt          string        `json:"prompt,omitempty"`
+		Messages        []llm.Message `json:"messages,omitempty"`
+		SessionID       uint          `json:"session_id,omitempty"`
+		HistoryLimit    int           `json:"history_limit,omitempty"`
+		SystemPrompt    string        `json:"system_prompt,omitempty"`
+		MaxContextChars int           `json:"max_context_chars,omitempty"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
@@ -154,7 +157,7 @@ func (s *Server) handleChat(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	var session *db.ChatSession
-	messages := make([]llm.Message, 0, len(incomingMessages)+db.DefaultHistoryLimit)
+	history := make([]llm.Message, 0, db.DefaultHistoryLimit)
 	if req.SessionID > 0 {
 		session, err = db.GetChatSession(database, req.SessionID)
 		if err != nil {
@@ -168,14 +171,14 @@ func (s *Server) handleChat(c echo.Context) error {
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-		messages = append(messages, toLLMMessages(recent)...)
+		history = append(history, toLLMMessages(recent)...)
 	} else {
 		session, err = db.CreateChatSession(database, firstUserContent(incomingMessages))
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 	}
-	messages = append(messages, incomingMessages...)
+	messages := contextpack.Pack(req.SystemPrompt, history, incomingMessages, req.MaxContextChars)
 
 	client, err := llm.NewClient(s.settings)
 	if err != nil {
@@ -194,7 +197,12 @@ func (s *Server) handleChat(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"session_id": session.ID, "history_messages": len(messages) - len(incomingMessages), "response": resp})
+	return c.JSON(http.StatusOK, map[string]any{
+		"session_id":       session.ID,
+		"history_messages": len(messages) - len(incomingMessages) - 1,
+		"context":          contextpack.Stats(messages),
+		"response":         resp,
+	})
 }
 
 func (s *Server) handleListSessions(c echo.Context) error {
