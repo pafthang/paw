@@ -3,6 +3,10 @@ package server
 func (s *Server) registerCompatRoutes() {
 	e := s.echo
 
+	e.POST("/api/v1/health/check", s.handleHealthCompat)
+	e.GET("/api/v1/health/errors", s.handleHealthErrors)
+	e.DELETE("/api/v1/health/errors", s.handleClearHealthErrors)
+
 	e.GET("/api/v1/memory/settings", s.handleMemorySettings)
 	e.POST("/api/v1/memory/settings", s.handleSaveMemorySettings)
 	e.GET("/api/v1/memory/stats", s.handleMemoryStats)
