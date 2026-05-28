@@ -29,26 +29,12 @@ func Run(ctx context.Context, args []string) error {
 }
 
 func newRootCommand(ctx context.Context, out io.Writer) *cobra.Command {
-	root := &cobra.Command{
-		Use:           "paw",
-		Short:         "PocketPaw Go core",
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServe(ctx, cmd, args)
-		},
-	}
+	root := &cobra.Command{Use: "paw", Short: "PocketPaw Go core", SilenceUsage: true, SilenceErrors: true, RunE: func(cmd *cobra.Command, args []string) error { return runServe(ctx, cmd, args) }}
 	root.SetOut(out)
 	root.SetErr(os.Stderr)
-	root.Version = "go-core-agent-tool-calls"
-
+	root.Version = "go-core-agent-final-response"
 	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newAgentCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out), newSessionsCommand(out), newToolsCommand(out), newRunToolCommand(ctx, out), newAuditCommand(out))
-	root.AddCommand(&cobra.Command{
-		Use:   "ask [prompt]",
-		Short: "Alias for chat",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) },
-	})
+	root.AddCommand(&cobra.Command{Use: "ask [prompt]", Short: "Alias for chat", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) }})
 	return root
 }
 
@@ -71,7 +57,7 @@ func newChatCommand(ctx context.Context, out io.Writer) *cobra.Command {
 }
 
 func newAgentCommand(ctx context.Context, out io.Writer) *cobra.Command {
-	cmd := &cobra.Command{Use: "agent [prompt]", Short: "Ask the LLM to decide whether tools are needed, then run them", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runAgentChat(ctx, out, cmd, args) }}
+	cmd := &cobra.Command{Use: "agent [prompt]", Short: "Ask the LLM to decide whether tools are needed, then run them and produce a final answer", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runAgentChat(ctx, out, cmd, args) }}
 	cmd.Flags().String("model", "", "model to use")
 	cmd.Flags().Bool("json", false, "print JSON response")
 	cmd.Flags().Uint("session", 0, "append to an existing session id")
@@ -81,9 +67,7 @@ func newAgentCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	return cmd
 }
 
-func newStatusCommand(out io.Writer) *cobra.Command {
-	return &cobra.Command{Use: "status", Short: "Print local status as JSON", RunE: func(cmd *cobra.Command, args []string) error { return runStatus(out) }}
-}
+func newStatusCommand(out io.Writer) *cobra.Command { return &cobra.Command{Use: "status", Short: "Print local status as JSON", RunE: func(cmd *cobra.Command, args []string) error { return runStatus(out) }} }
 
 func newDoctorCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{Use: "doctor", Aliases: []string{"health"}, Short: "Run basic health checks", RunE: func(cmd *cobra.Command, args []string) error { return runDoctor(ctx, out, cmd) }}
@@ -93,26 +77,13 @@ func newDoctorCommand(ctx context.Context, out io.Writer) *cobra.Command {
 
 func newConfigCommand(out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{Use: "config", Short: "Manage local config", RunE: func(cmd *cobra.Command, args []string) error { return runConfigShow(out) }}
-	cmd.AddCommand(
-		&cobra.Command{Use: "show", Short: "Print masked settings JSON", RunE: func(cmd *cobra.Command, args []string) error { return runConfigShow(out) }},
-		&cobra.Command{Use: "init", Short: "Create ~/.pocketpaw/config.json", RunE: func(cmd *cobra.Command, args []string) error { return runConfigInit(out) }},
-		&cobra.Command{Use: "path", Short: "Print config path", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.Path())); return nil }},
-		&cobra.Command{Use: "dir", Short: "Print config directory", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.Dir())); return nil }},
-		&cobra.Command{Use: "set <key> <value>", Short: "Save a supported config key", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error { return configSet(out, args[0], strings.Join(args[1:], " ")) }},
-	)
+	cmd.AddCommand(&cobra.Command{Use: "show", Short: "Print masked settings JSON", RunE: func(cmd *cobra.Command, args []string) error { return runConfigShow(out) }}, &cobra.Command{Use: "init", Short: "Create ~/.pocketpaw/config.json", RunE: func(cmd *cobra.Command, args []string) error { return runConfigInit(out) }}, &cobra.Command{Use: "path", Short: "Print config path", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.Path())); return nil }}, &cobra.Command{Use: "dir", Short: "Print config directory", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.Dir())); return nil }}, &cobra.Command{Use: "set <key> <value>", Short: "Save a supported config key", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error { return configSet(out, args[0], strings.Join(args[1:], " ")) }})
 	return cmd
 }
 
 func newDBCommand(out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{Use: "db", Short: "Manage local SQLite database"}
-	cmd.AddCommand(
-		&cobra.Command{Use: "path", Short: "Print SQLite database path", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.DBPath())); return nil }},
-		&cobra.Command{Use: "init", Short: "Open and migrate local SQLite database", RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := db.Open(); err != nil { return err }
-			fmt.Fprintln(out, must(config.DBPath()))
-			return nil
-		}},
-	)
+	cmd.AddCommand(&cobra.Command{Use: "path", Short: "Print SQLite database path", RunE: func(cmd *cobra.Command, args []string) error { fmt.Fprintln(out, must(config.DBPath())); return nil }}, &cobra.Command{Use: "init", Short: "Open and migrate local SQLite database", RunE: func(cmd *cobra.Command, args []string) error { if _, err := db.Open(); err != nil { return err }; fmt.Fprintln(out, must(config.DBPath())); return nil }})
 	return cmd
 }
 
@@ -127,16 +98,10 @@ func newSessionsCommand(out io.Writer) *cobra.Command {
 	return cmd
 }
 
-func newToolsCommand(out io.Writer) *cobra.Command {
-	return &cobra.Command{Use: "tools", Short: "List available agent tools", RunE: func(cmd *cobra.Command, args []string) error { return json.NewEncoder(out).Encode(tools.DefaultRegistry().List()) }}
-}
+func newToolsCommand(out io.Writer) *cobra.Command { return &cobra.Command{Use: "tools", Short: "List available agent tools", RunE: func(cmd *cobra.Command, args []string) error { return json.NewEncoder(out).Encode(tools.DefaultRegistry().List()) }} }
 
 func newRunToolCommand(ctx context.Context, out io.Writer) *cobra.Command {
-	cmd := &cobra.Command{Use: "run-tool <name>", Short: "Run one agent tool and audit it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		input, _ := cmd.Flags().GetString("input")
-		sessionID, _ := cmd.Flags().GetUint("session")
-		return runTool(ctx, out, args[0], input, sessionID)
-	}}
+	cmd := &cobra.Command{Use: "run-tool <name>", Short: "Run one agent tool and audit it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { input, _ := cmd.Flags().GetString("input"); sessionID, _ := cmd.Flags().GetUint("session"); return runTool(ctx, out, args[0], input, sessionID) }}
 	cmd.Flags().String("input", "{}", "tool input JSON")
 	cmd.Flags().Uint("session", 0, "optional session id for audit")
 	return cmd
@@ -168,24 +133,16 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 	maxContextChars, _ := cmd.Flags().GetInt("max-context-chars")
 	prompt := strings.TrimSpace(strings.Join(args, " "))
 	if prompt == "" { return errors.New("usage: paw chat [--model MODEL] [--session ID] [--history-limit N] [--max-context-chars N] <prompt>") }
-
 	database, err := db.Open(); if err != nil { return err }
 	var session *db.ChatSession
 	var history []llm.Message
 	incoming := []llm.Message{{Role: "user", Content: prompt}}
-	if sessionID > 0 {
-		session, err = db.GetChatSession(database, uint(sessionID)); if err != nil { return err }
-		recent, err := db.ListRecentChatMessages(database, session.ID, historyLimit); if err != nil { return err }
-		history = append(history, toLLMMessages(recent)...)
-	} else {
-		session, err = db.CreateChatSession(database, prompt); if err != nil { return err }
-	}
+	if sessionID > 0 { session, err = db.GetChatSession(database, uint(sessionID)); if err != nil { return err }; recent, err := db.ListRecentChatMessages(database, session.ID, historyLimit); if err != nil { return err }; history = append(history, toLLMMessages(recent)...) } else { session, err = db.CreateChatSession(database, prompt); if err != nil { return err } }
 	messages := contextpack.Pack(systemPrompt, history, incoming, maxContextChars)
 	client, err := llm.NewClient(settings); if err != nil { return err }
 	resp, err := client.Chat(ctx, llm.ChatRequest{Model: model, Messages: messages}); if err != nil { return err }
 	if _, err := db.AddChatMessage(database, session.ID, "user", prompt, model); err != nil { return err }
 	if _, err := db.AddChatMessage(database, session.ID, "assistant", resp.Content, resp.Model); err != nil { return err }
-
 	stats := contextpack.Stats(messages)
 	if jsonOut { return json.NewEncoder(out).Encode(map[string]any{"session_id": session.ID, "history_messages": len(messages)-len(incoming)-1, "context": stats, "response": resp}) }
 	fmt.Fprintf(out, "%s\n\n[session:%d history:%d context:%v chars]\n", resp.Content, session.ID, len(messages)-len(incoming)-1, stats["chars"])
@@ -202,15 +159,13 @@ func runAgentChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args [
 	maxContextChars, _ := cmd.Flags().GetInt("max-context-chars")
 	prompt := strings.TrimSpace(strings.Join(args, " "))
 	if prompt == "" { return errors.New("usage: paw agent [--model MODEL] [--session ID] <prompt>") }
-
 	database, err := db.Open(); if err != nil { return err }
 	client, err := llm.NewClient(settings); if err != nil { return err }
 	runner := agent.NewDefaultRunner(database)
 	resp, err := runner.Chat(ctx, client, agent.ChatRequest{SessionID: uint(sessionID), Prompt: prompt, Model: model, HistoryLimit: historyLimit, MaxContextChars: maxContextChars, SystemPrompt: systemPrompt})
 	if err != nil { return err }
 	if jsonOut { return json.NewEncoder(out).Encode(resp) }
-	fmt.Fprintln(out, resp.ModelResponse.Content)
-	if resp.UsedTools { _ = json.NewEncoder(out).Encode(resp.ToolRunResponse) }
+	if resp.UsedTools { fmt.Fprintln(out, resp.FinalResponse.Content) } else { fmt.Fprintln(out, resp.ModelResponse.Content) }
 	fmt.Fprintf(out, "\n[session:%d used_tools:%t]\n", resp.SessionID, resp.UsedTools)
 	return nil
 }
@@ -224,96 +179,15 @@ func runTool(ctx context.Context, out io.Writer, name string, input string, sess
 	return json.NewEncoder(out).Encode(resp)
 }
 
-func runAuditList(out io.Writer, cmd *cobra.Command) error {
-	limit, _ := cmd.Flags().GetInt("limit")
-	database, err := db.Open(); if err != nil { return err }
-	events, err := db.ListAuditEvents(database, limit); if err != nil { return err }
-	return json.NewEncoder(out).Encode(events)
-}
-
-func runStatus(out io.Writer) error {
-	settings, err := config.Load(); if err != nil { return err }
-	payload := map[string]any{"status": "ok", "implementation": "go", "stage": "agent-tool-calls", "stack": []string{"cobra", "echo", "gorm", "sqlite"}, "config_dir": must(config.Dir()), "config_path": must(config.Path()), "db_path": must(config.DBPath()), "web_host": settings.WebHost, "web_port": settings.WebPort, "agent_backend": settings.AgentBackend, "model": settings.Model}
-	return json.NewEncoder(out).Encode(payload)
-}
-
-func runDoctor(ctx context.Context, out io.Writer, cmd *cobra.Command) error {
-	settings, err := config.Load(); if err != nil { return err }
-	report := health.Run(ctx, settings)
-	asJSON, _ := cmd.Flags().GetBool("json")
-	if asJSON { return json.NewEncoder(out).Encode(report) }
-	fmt.Fprintf(out, "System: %s\n", strings.ToUpper(report.Status))
-	for _, check := range report.Checks { fmt.Fprintf(out, "[%s] %s: %s\n", strings.ToUpper(check.Status), check.Name, check.Message) }
-	return nil
-}
-
-func runSessionsList(out io.Writer, cmd *cobra.Command) error {
-	limit, _ := cmd.Flags().GetInt("limit")
-	database, err := db.Open(); if err != nil { return err }
-	sessions, err := db.ListChatSessions(database, limit); if err != nil { return err }
-	return json.NewEncoder(out).Encode(sessions)
-}
-
-func runSessionsShow(out io.Writer, rawID string) error {
-	id, err := strconv.ParseUint(rawID, 10, 64); if err != nil || id == 0 { return fmt.Errorf("invalid session id %q", rawID) }
-	database, err := db.Open(); if err != nil { return err }
-	session, err := db.GetChatSession(database, uint(id)); if err != nil { return err }
-	return json.NewEncoder(out).Encode(session)
-}
-
-func runSessionsDelete(out io.Writer, rawID string) error {
-	id, err := strconv.ParseUint(rawID, 10, 64); if err != nil || id == 0 { return fmt.Errorf("invalid session id %q", rawID) }
-	database, err := db.Open(); if err != nil { return err }
-	if err := db.DeleteChatSession(database, uint(id)); err != nil { return err }
-	fmt.Fprintf(out, "deleted session %d\n", id)
-	return nil
-}
-
-func runConfigShow(out io.Writer) error {
-	settings, err := config.Load(); if err != nil { return err }
-	settings.OpenAIAPIKey = mask(settings.OpenAIAPIKey)
-	settings.AnthropicAPIKey = mask(settings.AnthropicAPIKey)
-	settings.TelegramBotToken = mask(settings.TelegramBotToken)
-	return json.NewEncoder(out).Encode(settings)
-}
-
-func runConfigInit(out io.Writer) error {
-	settings, err := config.Load(); if err != nil { return err }
-	if err := config.Save(settings); err != nil { return err }
-	fmt.Fprintln(out, must(config.Path()))
-	return nil
-}
-
-func configSet(out io.Writer, key, value string) error {
-	settings, err := config.Load(); if err != nil { return err }
-	switch key {
-	case "web_host": settings.WebHost = value
-	case "web_port": var port int; if _, err := fmt.Sscanf(value, "%d", &port); err != nil || port <= 0 { return fmt.Errorf("invalid web_port %q", value) }; settings.WebPort = port
-	case "agent_backend": settings.AgentBackend = value
-	case "model": settings.Model = value
-	case "ollama_host": settings.OllamaHost = value
-	case "openai_compatible_base_url": settings.OpenAICompatibleBaseURL = value
-	case "openai_api_key": settings.OpenAIAPIKey = value
-	case "anthropic_api_key": settings.AnthropicAPIKey = value
-	case "telegram_bot_token": settings.TelegramBotToken = value
-	default:
-		keys := []string{"web_host", "web_port", "agent_backend", "model", "ollama_host", "openai_compatible_base_url", "openai_api_key", "anthropic_api_key", "telegram_bot_token"}
-		sort.Strings(keys)
-		return fmt.Errorf("unknown config key %q; supported: %s", key, strings.Join(keys, ", "))
-	}
-	if err := config.Save(settings); err != nil { return err }
-	fmt.Fprintf(out, "saved %s\n", key)
-	return nil
-}
-
-func toLLMMessages(messages []db.ChatMessage) []llm.Message {
-	out := make([]llm.Message, 0, len(messages))
-	for _, message := range messages {
-		if message.Role == "" || message.Content == "" { continue }
-		out = append(out, llm.Message{Role: message.Role, Content: message.Content})
-	}
-	return out
-}
-
+func runAuditList(out io.Writer, cmd *cobra.Command) error { limit, _ := cmd.Flags().GetInt("limit"); database, err := db.Open(); if err != nil { return err }; events, err := db.ListAuditEvents(database, limit); if err != nil { return err }; return json.NewEncoder(out).Encode(events) }
+func runStatus(out io.Writer) error { settings, err := config.Load(); if err != nil { return err }; payload := map[string]any{"status": "ok", "implementation": "go", "stage": "agent-final-response", "stack": []string{"cobra", "echo", "gorm", "sqlite"}, "config_dir": must(config.Dir()), "config_path": must(config.Path()), "db_path": must(config.DBPath()), "web_host": settings.WebHost, "web_port": settings.WebPort, "agent_backend": settings.AgentBackend, "model": settings.Model}; return json.NewEncoder(out).Encode(payload) }
+func runDoctor(ctx context.Context, out io.Writer, cmd *cobra.Command) error { settings, err := config.Load(); if err != nil { return err }; report := health.Run(ctx, settings); asJSON, _ := cmd.Flags().GetBool("json"); if asJSON { return json.NewEncoder(out).Encode(report) }; fmt.Fprintf(out, "System: %s\n", strings.ToUpper(report.Status)); for _, check := range report.Checks { fmt.Fprintf(out, "[%s] %s: %s\n", strings.ToUpper(check.Status), check.Name, check.Message) }; return nil }
+func runSessionsList(out io.Writer, cmd *cobra.Command) error { limit, _ := cmd.Flags().GetInt("limit"); database, err := db.Open(); if err != nil { return err }; sessions, err := db.ListChatSessions(database, limit); if err != nil { return err }; return json.NewEncoder(out).Encode(sessions) }
+func runSessionsShow(out io.Writer, rawID string) error { id, err := strconv.ParseUint(rawID, 10, 64); if err != nil || id == 0 { return fmt.Errorf("invalid session id %q", rawID) }; database, err := db.Open(); if err != nil { return err }; session, err := db.GetChatSession(database, uint(id)); if err != nil { return err }; return json.NewEncoder(out).Encode(session) }
+func runSessionsDelete(out io.Writer, rawID string) error { id, err := strconv.ParseUint(rawID, 10, 64); if err != nil || id == 0 { return fmt.Errorf("invalid session id %q", rawID) }; database, err := db.Open(); if err != nil { return err }; if err := db.DeleteChatSession(database, uint(id)); err != nil { return err }; fmt.Fprintf(out, "deleted session %d\n", id); return nil }
+func runConfigShow(out io.Writer) error { settings, err := config.Load(); if err != nil { return err }; settings.OpenAIAPIKey = mask(settings.OpenAIAPIKey); settings.AnthropicAPIKey = mask(settings.AnthropicAPIKey); settings.TelegramBotToken = mask(settings.TelegramBotToken); return json.NewEncoder(out).Encode(settings) }
+func runConfigInit(out io.Writer) error { settings, err := config.Load(); if err != nil { return err }; if err := config.Save(settings); err != nil { return err }; fmt.Fprintln(out, must(config.Path())); return nil }
+func configSet(out io.Writer, key, value string) error { settings, err := config.Load(); if err != nil { return err }; switch key { case "web_host": settings.WebHost = value; case "web_port": var port int; if _, err := fmt.Sscanf(value, "%d", &port); err != nil || port <= 0 { return fmt.Errorf("invalid web_port %q", value) }; settings.WebPort = port; case "agent_backend": settings.AgentBackend = value; case "model": settings.Model = value; case "ollama_host": settings.OllamaHost = value; case "openai_compatible_base_url": settings.OpenAICompatibleBaseURL = value; case "openai_api_key": settings.OpenAIAPIKey = value; case "anthropic_api_key": settings.AnthropicAPIKey = value; case "telegram_bot_token": settings.TelegramBotToken = value; default: keys := []string{"web_host", "web_port", "agent_backend", "model", "ollama_host", "openai_compatible_base_url", "openai_api_key", "anthropic_api_key", "telegram_bot_token"}; sort.Strings(keys); return fmt.Errorf("unknown config key %q; supported: %s", key, strings.Join(keys, ", ")) }; if err := config.Save(settings); err != nil { return err }; fmt.Fprintf(out, "saved %s\n", key); return nil }
+func toLLMMessages(messages []db.ChatMessage) []llm.Message { out := make([]llm.Message, 0, len(messages)); for _, message := range messages { if message.Role == "" || message.Content == "" { continue }; out = append(out, llm.Message{Role: message.Role, Content: message.Content}) }; return out }
 func mask(value string) string { if value == "" { return "" }; return "***" }
 func must(value string, err error) string { if err != nil { return err.Error() }; return value }

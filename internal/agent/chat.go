@@ -29,21 +29,26 @@ Available tools:
 
 If you do not need tools, answer normally in plain text.`
 
+const FinalAnswerSystemPrompt = `You are Paw, a local coding assistant.
+You have just received tool results. Use them to answer the user's original request.
+Do not emit more tool_calls JSON in this final answer. Be concise and practical.`
+
 type ChatRequest struct {
-	SessionID       uint          `json:"session_id,omitempty"`
-	Prompt          string        `json:"prompt"`
-	Model           string        `json:"model,omitempty"`
-	HistoryLimit    int           `json:"history_limit,omitempty"`
-	MaxContextChars int           `json:"max_context_chars,omitempty"`
-	SystemPrompt    string        `json:"system_prompt,omitempty"`
+	SessionID       uint   `json:"session_id,omitempty"`
+	Prompt          string `json:"prompt"`
+	Model           string `json:"model,omitempty"`
+	HistoryLimit    int    `json:"history_limit,omitempty"`
+	MaxContextChars int    `json:"max_context_chars,omitempty"`
+	SystemPrompt    string `json:"system_prompt,omitempty"`
 }
 
 type ChatResponse struct {
-	SessionID       uint            `json:"session_id"`
+	SessionID       uint             `json:"session_id"`
 	ModelResponse   llm.ChatResponse `json:"model_response"`
-	ToolCalls       []ToolCall      `json:"tool_calls,omitempty"`
-	ToolRunResponse RunResponse     `json:"tool_run_response,omitempty"`
-	UsedTools       bool            `json:"used_tools"`
+	FinalResponse   llm.ChatResponse `json:"final_response,omitempty"`
+	ToolCalls       []ToolCall       `json:"tool_calls,omitempty"`
+	ToolRunResponse RunResponse      `json:"tool_run_response,omitempty"`
+	UsedTools       bool             `json:"used_tools"`
 }
 
 func (r *Runner) Chat(ctx context.Context, client llm.Client, req ChatRequest) (ChatResponse, error) {
@@ -75,8 +80,13 @@ func (r *Runner) Chat(ctx context.Context, client llm.Client, req ChatRequest) (
 
 	calls := ParseToolCalls(modelResp.Content)
 	var runResp RunResponse
+	finalResp := modelResp
 	if len(calls) > 0 {
 		runResp, err = r.Run(ctx, RunRequest{SessionID: session.ID, ToolCalls: calls})
+		if err != nil {
+			return ChatResponse{}, err
+		}
+		finalResp, err = r.finalizeWithToolResults(ctx, client, req, history, prompt, modelResp, runResp)
 		if err != nil {
 			return ChatResponse{}, err
 		}
@@ -84,10 +94,30 @@ func (r *Runner) Chat(ctx context.Context, client llm.Client, req ChatRequest) (
 	if _, err := db.AddChatMessage(r.DB, session.ID, "user", prompt, req.Model); err != nil {
 		return ChatResponse{}, err
 	}
-	if _, err := db.AddChatMessage(r.DB, session.ID, "assistant", modelResp.Content, modelResp.Model); err != nil {
-		return ChatResponse{}, err
+	if len(calls) > 0 {
+		if _, err := db.AddChatMessage(r.DB, session.ID, "assistant", finalResp.Content, finalResp.Model); err != nil {
+			return ChatResponse{}, err
+		}
+	} else {
+		if _, err := db.AddChatMessage(r.DB, session.ID, "assistant", modelResp.Content, modelResp.Model); err != nil {
+			return ChatResponse{}, err
+		}
 	}
-	return ChatResponse{SessionID: session.ID, ModelResponse: modelResp, ToolCalls: calls, ToolRunResponse: runResp, UsedTools: len(calls) > 0}, nil
+	return ChatResponse{SessionID: session.ID, ModelResponse: modelResp, FinalResponse: finalResp, ToolCalls: calls, ToolRunResponse: runResp, UsedTools: len(calls) > 0}, nil
+}
+
+func (r *Runner) finalizeWithToolResults(ctx context.Context, client llm.Client, req ChatRequest, history []llm.Message, prompt string, modelResp llm.ChatResponse, runResp RunResponse) (llm.ChatResponse, error) {
+	toolJSON, err := json.MarshalIndent(runResp, "", "  ")
+	if err != nil {
+		return llm.ChatResponse{}, err
+	}
+	incoming := []llm.Message{
+		{Role: "user", Content: prompt},
+		{Role: "assistant", Content: modelResp.Content},
+		{Role: "user", Content: "Tool results:\n" + string(toolJSON) + "\n\nNow answer my original request using these results."},
+	}
+	messages := contextpack.Pack(FinalAnswerSystemPrompt, history, incoming, req.MaxContextChars)
+	return client.Chat(ctx, llm.ChatRequest{Model: req.Model, Messages: messages})
 }
 
 func (r *Runner) prepareSession(req ChatRequest) (*db.ChatSession, []llm.Message, error) {
