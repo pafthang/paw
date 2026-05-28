@@ -23,6 +23,17 @@ type ToolCall struct {
 type RunRequest struct {
 	SessionID uint       `json:"session_id,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls"`
+	OnTool    ToolHook   `json:"-"`
+}
+
+type ToolHook func(event ToolEvent)
+
+type ToolEvent struct {
+	Type     string        `json:"type"`
+	Index    int           `json:"index"`
+	ToolName string        `json:"tool_name"`
+	Call     ToolCall      `json:"call,omitempty"`
+	Result   ToolRunResult `json:"result,omitempty"`
 }
 
 type RunResponse struct {
@@ -50,12 +61,14 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResponse, error) {
 		return RunResponse{}, fmt.Errorf("tool_calls is required")
 	}
 	out := RunResponse{Results: make([]ToolRunResult, 0, len(req.ToolCalls))}
-	for _, call := range req.ToolCalls {
+	for i, call := range req.ToolCalls {
+		emitToolEvent(req.OnTool, ToolEvent{Type: "tool.started", Index: i, ToolName: call.Name, Call: call})
 		tool, err := r.Registry.Get(call.Name)
 		if err != nil {
 			result := ToolRunResult{ToolName: call.Name, Error: err.Error()}
 			out.Results = append(out.Results, result)
 			_, _ = db.CreateToolAuditEvent(r.DB, req.SessionID, call.Name, call, result, err)
+			emitToolEvent(req.OnTool, ToolEvent{Type: "tool.error", Index: i, ToolName: call.Name, Result: result})
 			continue
 		}
 		result, err := tool.Run(ctx, call.Input)
@@ -65,6 +78,17 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResponse, error) {
 		}
 		out.Results = append(out.Results, runResult)
 		_, _ = db.CreateToolAuditEvent(r.DB, req.SessionID, call.Name, call, runResult, err)
+		if err != nil {
+			emitToolEvent(req.OnTool, ToolEvent{Type: "tool.error", Index: i, ToolName: call.Name, Result: runResult})
+		} else {
+			emitToolEvent(req.OnTool, ToolEvent{Type: "tool.result", Index: i, ToolName: call.Name, Result: runResult})
+		}
 	}
 	return out, nil
+}
+
+func emitToolEvent(hook ToolHook, event ToolEvent) {
+	if hook != nil {
+		hook(event)
+	}
 }
