@@ -3,6 +3,8 @@ package server
 func (s *Server) registerCompatRoutes() {
 	e := s.echo
 
+	e.GET("/api/v1/files/recent", s.handleRecentFiles)
+
 	e.GET("/api/v1/identity", s.handleIdentityGet)
 	e.PUT("/api/v1/identity", s.handleIdentityPut)
 
