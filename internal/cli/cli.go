@@ -32,8 +32,8 @@ func newRootCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	root := &cobra.Command{Use: "paw", Short: "PocketPaw Go core", SilenceUsage: true, SilenceErrors: true, RunE: func(cmd *cobra.Command, args []string) error { return runServe(ctx, cmd, args) }}
 	root.SetOut(out)
 	root.SetErr(os.Stderr)
-	root.Version = "go-core-agent-final-response"
-	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newAgentCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out), newSessionsCommand(out), newToolsCommand(out), newRunToolCommand(ctx, out), newAuditCommand(out))
+	root.Version = "go-core-stage2-auth-ws"
+	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newAgentCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newAuthCommand(out), newDBCommand(out), newSessionsCommand(out), newToolsCommand(out), newRunToolCommand(ctx, out), newAuditCommand(out))
 	root.AddCommand(&cobra.Command{Use: "ask [prompt]", Short: "Alias for chat", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runChat(ctx, out, cmd, args) }})
 	return root
 }
@@ -180,7 +180,7 @@ func runTool(ctx context.Context, out io.Writer, name string, input string, sess
 }
 
 func runAuditList(out io.Writer, cmd *cobra.Command) error { limit, _ := cmd.Flags().GetInt("limit"); database, err := db.Open(); if err != nil { return err }; events, err := db.ListAuditEvents(database, limit); if err != nil { return err }; return json.NewEncoder(out).Encode(events) }
-func runStatus(out io.Writer) error { settings, err := config.Load(); if err != nil { return err }; payload := map[string]any{"status": "ok", "implementation": "go", "stage": "agent-final-response", "stack": []string{"cobra", "echo", "gorm", "sqlite"}, "config_dir": must(config.Dir()), "config_path": must(config.Path()), "db_path": must(config.DBPath()), "web_host": settings.WebHost, "web_port": settings.WebPort, "agent_backend": settings.AgentBackend, "model": settings.Model}; return json.NewEncoder(out).Encode(payload) }
+func runStatus(out io.Writer) error { settings, err := config.Load(); if err != nil { return err }; payload := map[string]any{"status": "ok", "implementation": "go", "stage": "stage2-auth-ws", "stack": []string{"cobra", "echo", "gorm", "sqlite"}, "config_dir": must(config.Dir()), "config_path": must(config.Path()), "access_token_path": must(config.AccessTokenPath()), "db_path": must(config.DBPath()), "web_host": settings.WebHost, "web_port": settings.WebPort, "agent_backend": settings.AgentBackend, "model": settings.Model}; return json.NewEncoder(out).Encode(payload) }
 func runDoctor(ctx context.Context, out io.Writer, cmd *cobra.Command) error { settings, err := config.Load(); if err != nil { return err }; report := health.Run(ctx, settings); asJSON, _ := cmd.Flags().GetBool("json"); if asJSON { return json.NewEncoder(out).Encode(report) }; fmt.Fprintf(out, "System: %s\n", strings.ToUpper(report.Status)); for _, check := range report.Checks { fmt.Fprintf(out, "[%s] %s: %s\n", strings.ToUpper(check.Status), check.Name, check.Message) }; return nil }
 func runSessionsList(out io.Writer, cmd *cobra.Command) error { limit, _ := cmd.Flags().GetInt("limit"); database, err := db.Open(); if err != nil { return err }; sessions, err := db.ListChatSessions(database, limit); if err != nil { return err }; return json.NewEncoder(out).Encode(sessions) }
 func runSessionsShow(out io.Writer, rawID string) error { id, err := strconv.ParseUint(rawID, 10, 64); if err != nil || id == 0 { return fmt.Errorf("invalid session id %q", rawID) }; database, err := db.Open(); if err != nil { return err }; session, err := db.GetChatSession(database, uint(id)); if err != nil { return err }; return json.NewEncoder(out).Encode(session) }
