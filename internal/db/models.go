@@ -28,13 +28,25 @@ type MemoryItem struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type AuditEvent struct {
+type FileRecord struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	SessionID uint      `gorm:"index" json:"session_id,omitempty"`
-	Type      string    `gorm:"index" json:"type"`
-	ToolName  string    `gorm:"index" json:"tool_name,omitempty"`
-	InputJSON string    `json:"input_json,omitempty"`
-	OutputJSON string   `json:"output_json,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	Path      string    `gorm:"index" json:"path"`
+	Name      string    `gorm:"index" json:"name"`
+	MimeType  string    `json:"mime_type,omitempty"`
+	SizeBytes int64     `json:"size_bytes,omitempty"`
+	Sha256    string    `gorm:"index" json:"sha256,omitempty"`
+	Metadata  string    `json:"metadata,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type AuditEvent struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	SessionID  uint      `gorm:"index" json:"session_id,omitempty"`
+	Type       string    `gorm:"index" json:"type"`
+	ToolName   string    `gorm:"index" json:"tool_name,omitempty"`
+	InputJSON  string    `json:"input_json,omitempty"`
+	OutputJSON string    `json:"output_json,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }

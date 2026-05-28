@@ -12,6 +12,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/pafthang/paw/internal/channels"
+	tg "github.com/pafthang/paw/internal/channels/telegram"
 	"github.com/pafthang/paw/internal/config"
 	"github.com/pafthang/paw/internal/contextpack"
 	"github.com/pafthang/paw/internal/db"
@@ -23,6 +25,7 @@ type Server struct {
 	settings config.Settings
 	echo     *echo.Echo
 	addr     string
+	channels *channels.Manager
 }
 
 func New(settings config.Settings) *Server {
@@ -31,13 +34,22 @@ func New(settings config.Settings) *Server {
 	e.HidePort = true
 	e.Use(middleware.Recover())
 	e.Use(securityHeaders)
+	if len(settings.CORSAllowedOrigins) > 0 {
+		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+			AllowOrigins: settings.CORSAllowedOrigins,
+			AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+			AllowHeaders: []string{"Authorization", "Content-Type", "X-Paw-Access-Token"},
+		}))
+	}
 	e.Use(accessTokenMiddleware)
 
 	s := &Server{
 		settings: settings,
 		echo:     e,
 		addr:     net.JoinHostPort(settings.WebHost, fmt.Sprintf("%d", settings.WebPort)),
+		channels: channels.NewManager(),
 	}
+	s.channels.Register(tg.New(settings))
 
 	e.GET("/", s.handleIndex)
 	e.GET("/ws", s.handleWS)
@@ -48,10 +60,37 @@ func New(settings config.Settings) *Server {
 	e.GET("/api/v1/sessions", s.handleListSessions)
 	e.GET("/api/v1/sessions/:id", s.handleGetSession)
 	e.DELETE("/api/v1/sessions/:id", s.handleDeleteSession)
+	e.GET("/api/v1/sessions/search", s.handleSearchSessions)
+	e.PATCH("/api/v1/sessions/:id", s.handlePatchSession)
 	e.GET("/api/v1/tools", s.handleListTools)
 	e.POST("/api/v1/agent/run", s.handleAgentRun)
 	e.POST("/api/v1/agent/chat", s.handleAgentChat)
 	e.GET("/api/v1/audit", s.handleListAudit)
+	e.GET("/api/v1/memory", s.handleListMemory)
+	e.POST("/api/v1/memory", s.handleCreateMemory)
+	e.GET("/api/v1/memory/:id", s.handleGetMemory)
+	e.DELETE("/api/v1/memory/:id", s.handleDeleteMemory)
+	e.GET("/api/v1/memory/search", s.handleSearchMemory)
+	e.GET("/api/v1/files", s.handleListFiles)
+	e.POST("/api/v1/files", s.handleCreateFile)
+	e.GET("/api/v1/files/:id", s.handleGetFile)
+	e.DELETE("/api/v1/files/:id", s.handleDeleteFile)
+	e.GET("/api/v1/files/search", s.handleSearchFiles)
+	e.GET("/api/v1/search", s.handleSearch)
+	e.GET("/api/v1/skills", s.handleListSkills)
+	e.GET("/api/v1/skills/:name", s.handleGetSkill)
+	e.POST("/api/v1/skills/reload", s.handleReloadSkills)
+	e.GET("/api/v1/mcp", s.handleMCPList)
+	e.GET("/api/v1/mcp/:name", s.handleMCPShow)
+	e.POST("/api/v1/mcp", s.handleMCPAdd)
+	e.DELETE("/api/v1/mcp/:name", s.handleMCPRemove)
+	e.POST("/api/v1/mcp/:name/start", s.handleMCPStart)
+	e.POST("/api/v1/mcp/:name/stop", s.handleMCPStop)
+	e.GET("/api/v1/mcp/status", s.handleMCPStatus)
+	e.GET("/api/v1/channels", s.handleChannelsList)
+	e.GET("/api/v1/channels/status", s.handleChannelsStatus)
+	e.POST("/api/v1/channels/:name/start", s.handleChannelsStart)
+	e.POST("/api/v1/channels/:name/stop", s.handleChannelsStop)
 
 	return s
 }
@@ -82,7 +121,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"name":    "paw",
-		"mode":    "go-core-stage2-auth-ws",
+		"mode":    "go-core-stage7-telegram",
 		"message": "PocketPaw Go core API compatibility layer is running.",
 		"stack": []string{
 			"cobra",
@@ -98,11 +137,38 @@ func (s *Server) handleIndex(c echo.Context) error {
 			"POST /api/v1/chat",
 			"GET /api/v1/sessions",
 			"GET /api/v1/sessions/:id",
+			"GET /api/v1/sessions/search?q=...",
+			"PATCH /api/v1/sessions/:id",
 			"DELETE /api/v1/sessions/:id",
 			"GET /api/v1/tools",
 			"POST /api/v1/agent/run",
 			"POST /api/v1/agent/chat",
 			"GET /api/v1/audit",
+			"GET /api/v1/memory",
+			"POST /api/v1/memory",
+			"GET /api/v1/memory/:id",
+			"DELETE /api/v1/memory/:id",
+			"GET /api/v1/memory/search?q=...",
+			"GET /api/v1/files",
+			"POST /api/v1/files",
+			"GET /api/v1/files/:id",
+			"DELETE /api/v1/files/:id",
+			"GET /api/v1/files/search?q=...",
+			"GET /api/v1/search?q=...",
+			"GET /api/v1/skills",
+			"GET /api/v1/skills/:name",
+			"POST /api/v1/skills/reload",
+			"GET /api/v1/mcp",
+			"GET /api/v1/mcp/:name",
+			"POST /api/v1/mcp",
+			"DELETE /api/v1/mcp/:name",
+			"POST /api/v1/mcp/:name/start",
+			"POST /api/v1/mcp/:name/stop",
+			"GET /api/v1/mcp/status",
+			"GET /api/v1/channels",
+			"GET /api/v1/channels/status",
+			"POST /api/v1/channels/:name/start",
+			"POST /api/v1/channels/:name/stop",
 		},
 	})
 }
@@ -113,14 +179,14 @@ func (s *Server) handleHealth(c echo.Context) error {
 
 func (s *Server) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":        "ok",
+		"status":         "ok",
 		"implementation": "go",
-		"stage":         "stage2-auth-ws",
-		"web_host":      s.settings.WebHost,
-		"web_port":      s.settings.WebPort,
-		"agent_backend": s.settings.AgentBackend,
-		"model":         s.settings.Model,
-		"stack":         []string{"cobra", "echo", "gorm", "sqlite"},
+		"stage":          "stage7-telegram",
+		"web_host":       s.settings.WebHost,
+		"web_port":       s.settings.WebPort,
+		"agent_backend":  s.settings.AgentBackend,
+		"model":          s.settings.Model,
+		"stack":          []string{"cobra", "echo", "gorm", "sqlite"},
 	})
 }
 

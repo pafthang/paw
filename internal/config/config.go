@@ -36,6 +36,7 @@ func DefaultSettings() Settings {
 		OllamaHost:              "http://127.0.0.1:11434",
 		OpenAICompatibleBaseURL: "https://api.openai.com/v1",
 		HealthCheckOnStartup:    true,
+		CORSAllowedOrigins:      []string{"http://localhost:1420"},
 	}
 }
 
@@ -69,6 +70,30 @@ func AccessTokenPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "access_token"), nil
+}
+
+func FilesDir() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "files"), nil
+}
+
+func SkillsDir() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "skills"), nil
+}
+
+func MCPPath() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "mcp.json"), nil
 }
 
 func EnsureDir() error {

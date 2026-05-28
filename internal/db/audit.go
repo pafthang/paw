@@ -14,11 +14,15 @@ func CreateAuditEvent(database *gorm.DB, event AuditEvent) (*AuditEvent, error) 
 }
 
 func CreateToolAuditEvent(database *gorm.DB, sessionID uint, toolName string, input any, output any, runErr error) (*AuditEvent, error) {
+	return CreateToolAuditEventWithType(database, sessionID, "tool.run", toolName, input, output, runErr)
+}
+
+func CreateToolAuditEventWithType(database *gorm.DB, sessionID uint, eventType string, toolName string, input any, output any, runErr error) (*AuditEvent, error) {
 	inputJSON, _ := json.Marshal(input)
 	outputJSON, _ := json.Marshal(output)
 	event := AuditEvent{
 		SessionID:  sessionID,
-		Type:       "tool.run",
+		Type:       eventType,
 		ToolName:   toolName,
 		InputJSON:  string(inputJSON),
 		OutputJSON: string(outputJSON),

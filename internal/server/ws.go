@@ -18,15 +18,20 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 type wsRequest struct {
-	Type            string        `json:"type"`
-	ID              string        `json:"id,omitempty"`
-	Prompt          string        `json:"prompt,omitempty"`
-	Model           string        `json:"model,omitempty"`
-	Messages        []llm.Message `json:"messages,omitempty"`
-	SessionID       uint          `json:"session_id,omitempty"`
-	HistoryLimit    int           `json:"history_limit,omitempty"`
-	SystemPrompt    string        `json:"system_prompt,omitempty"`
-	MaxContextChars int           `json:"max_context_chars,omitempty"`
+	Type                string        `json:"type"`
+	ID                  string        `json:"id,omitempty"`
+	Prompt              string        `json:"prompt,omitempty"`
+	Model               string        `json:"model,omitempty"`
+	Messages            []llm.Message `json:"messages,omitempty"`
+	SessionID           uint          `json:"session_id,omitempty"`
+	HistoryLimit        int           `json:"history_limit,omitempty"`
+	SystemPrompt        string        `json:"system_prompt,omitempty"`
+	Skill               string        `json:"skill,omitempty"`
+	MaxContextChars     int           `json:"max_context_chars,omitempty"`
+	MaxIterations       int           `json:"max_iterations,omitempty"`
+	Workspace           string        `json:"workspace,omitempty"`
+	AllowShell          bool          `json:"allow_shell,omitempty"`
+	AllowShellDangerous bool          `json:"allow_shell_dangerous,omitempty"`
 }
 
 func (s *Server) handleWS(c echo.Context) error {
@@ -158,19 +163,35 @@ func (s *Server) handleWSAgentChat(conn *websocket.Conn, req wsRequest) {
 	}
 	runner := agent.NewDefaultRunner(database)
 	resp, err := runner.Chat(nilContext(), client, agent.ChatRequest{
-		SessionID:       req.SessionID,
-		Prompt:          req.Prompt,
-		Model:           model,
-		HistoryLimit:    req.HistoryLimit,
-		MaxContextChars: req.MaxContextChars,
-		SystemPrompt:    req.SystemPrompt,
+		SessionID:           req.SessionID,
+		Prompt:              req.Prompt,
+		Model:               model,
+		HistoryLimit:        req.HistoryLimit,
+		MaxContextChars:     req.MaxContextChars,
+		SystemPrompt:        req.SystemPrompt,
+		Skill:               req.Skill,
+		MaxIterations:       req.MaxIterations,
+		Workspace:           req.Workspace,
+		AllowShell:          req.AllowShell,
+		AllowShellDangerous: req.AllowShellDangerous,
 		OnTool: func(event agent.ToolEvent) {
 			_ = conn.WriteJSON(wsEvent("agent."+event.Type, req.ID, map[string]any{
+				"iteration": event.Iteration,
 				"index":     event.Index,
 				"tool_name": event.ToolName,
 				"call":      event.Call,
 				"result":    event.Result,
 			}))
+		},
+		OnAgent: func(event agent.AgentEvent) {
+			switch event.Type {
+			case "iteration.started":
+				_ = conn.WriteJSON(wsEvent("agent.iteration.started", req.ID, map[string]any{"iteration": event.Iteration}))
+			case "iteration.model_result":
+				_ = conn.WriteJSON(wsEvent("agent.iteration.model_result", req.ID, map[string]any{"iteration": event.Iteration, "model_response": event.ModelResult}))
+			case "iteration.finished":
+				_ = conn.WriteJSON(wsEvent("agent.iteration.finished", req.ID, map[string]any{"iteration": event.Iteration}))
+			}
 		},
 	})
 	if err != nil {
@@ -202,6 +223,6 @@ func nilContext() contextShim { return contextShim{} }
 type contextShim struct{}
 
 func (contextShim) Deadline() (deadline time.Time, ok bool) { return time.Time{}, false }
-func (contextShim) Done() <-chan struct{} { return nil }
-func (contextShim) Err() error { return nil }
-func (contextShim) Value(key any) any { return nil }
+func (contextShim) Done() <-chan struct{}                   { return nil }
+func (contextShim) Err() error                              { return nil }
+func (contextShim) Value(key any) any                       { return nil }

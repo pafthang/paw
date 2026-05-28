@@ -18,7 +18,7 @@ func Open() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := database.AutoMigrate(&ChatSession{}, &ChatMessage{}, &MemoryItem{}, &AuditEvent{}); err != nil {
+	if err := database.AutoMigrate(&ChatSession{}, &ChatMessage{}, &MemoryItem{}, &FileRecord{}, &AuditEvent{}); err != nil {
 		return nil, err
 	}
 	return database, nil

@@ -97,3 +97,43 @@ func DeleteChatSession(database *gorm.DB, id uint) error {
 		return tx.Delete(&ChatSession{}, id).Error
 	})
 }
+
+func RenameChatSession(database *gorm.DB, id uint, title string) (*ChatSession, error) {
+	if id == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, gorm.ErrInvalidValue
+	}
+	if len(title) > 80 {
+		title = title[:80]
+	}
+	if err := database.Model(&ChatSession{}).Where("id = ?", id).Update("title", title).Error; err != nil {
+		return nil, err
+	}
+	return GetChatSession(database, id)
+}
+
+func SearchChatSessions(database *gorm.DB, query string, limit int) ([]ChatSession, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, gorm.ErrInvalidValue
+	}
+	if limit <= 0 {
+		limit = defaultSessionLimit
+	}
+	like := "%" + query + "%"
+	var sessions []ChatSession
+	if err := database.
+		Model(&ChatSession{}).
+		Distinct("chat_sessions.*").
+		Joins("LEFT JOIN chat_messages ON chat_messages.chat_session_id = chat_sessions.id").
+		Where("chat_sessions.title LIKE ? OR chat_messages.content LIKE ?", like, like).
+		Order("chat_sessions.updated_at desc, chat_sessions.id desc").
+		Limit(limit).
+		Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}

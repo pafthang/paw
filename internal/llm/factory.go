@@ -18,8 +18,10 @@ func NewClient(settings config.Settings) (Client, error) {
 			baseURL = "https://api.openai.com/v1"
 		}
 		return NewOpenAICompatibleClient(baseURL, settings.OpenAIAPIKey), nil
+	case "anthropic", "claude":
+		return NewAnthropicClient(settings.AnthropicAPIKey), nil
 	default:
-		return nil, fmt.Errorf("unsupported agent_backend %q; supported: ollama, openai_compatible", settings.AgentBackend)
+		return nil, fmt.Errorf("unsupported agent_backend %q; supported: ollama, openai_compatible, openai, anthropic", settings.AgentBackend)
 	}
 }
 
@@ -30,6 +32,8 @@ func DefaultModel(settings config.Settings) string {
 	switch strings.ToLower(strings.TrimSpace(settings.AgentBackend)) {
 	case "openai", "openai_compatible", "openai-compatible":
 		return "gpt-4o-mini"
+	case "anthropic", "claude":
+		return "claude-3-5-haiku-latest"
 	default:
 		return "qwen2.5:7b"
 	}
