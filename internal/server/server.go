@@ -97,6 +97,7 @@ func New(settings config.Settings) *Server {
 	e.GET("/api/v1/channels/status", s.handleChannelsStatus)
 	e.POST("/api/v1/channels/:name/start", s.handleChannelsStart)
 	e.POST("/api/v1/channels/:name/stop", s.handleChannelsStop)
+	s.registerCompatRoutes()
 
 	return s
 }
@@ -180,6 +181,13 @@ func (s *Server) handleIndex(c echo.Context) error {
 			"GET /api/v1/channels/status",
 			"POST /api/v1/channels/:name/start",
 			"POST /api/v1/channels/:name/stop",
+			"GET /api/v1/identity",
+			"PUT /api/v1/identity",
+			"GET /api/v1/kits",
+			"GET /api/v1/kits/catalog",
+			"GET /api/mission-control/agents",
+			"GET /api/mission-control/notifications",
+			"GET /api/mission-control/tasks/running",
 		},
 	})
 }
