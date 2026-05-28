@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/pafthang/paw/internal/agent"
 	pawauth "github.com/pafthang/paw/internal/auth"
+	"github.com/pafthang/paw/internal/contextpack"
 	"github.com/pafthang/paw/internal/db"
 	"github.com/pafthang/paw/internal/llm"
 )
@@ -77,20 +78,66 @@ func (s *Server) handleWSChat(conn *websocket.Conn, req wsRequest) {
 	if model == "" {
 		model = llm.DefaultModel(s.settings)
 	}
-	messages := req.Messages
-	if len(messages) == 0 && req.Prompt != "" {
-		messages = []llm.Message{{Role: "user", Content: req.Prompt}}
+	incomingMessages := req.Messages
+	if len(incomingMessages) == 0 && req.Prompt != "" {
+		incomingMessages = []llm.Message{{Role: "user", Content: req.Prompt}}
 	}
-	if len(messages) == 0 {
+	if len(incomingMessages) == 0 {
 		_ = conn.WriteJSON(wsEvent("chat.error", req.ID, map[string]any{"error": "prompt or messages is required"}))
 		return
 	}
+	database, err := db.Open()
+	if err != nil {
+		_ = conn.WriteJSON(wsError("chat.error", req.ID, err))
+		return
+	}
+	var session *db.ChatSession
+	history := make([]llm.Message, 0, db.DefaultHistoryLimit)
+	if req.SessionID > 0 {
+		session, err = db.GetChatSession(database, req.SessionID)
+		if err != nil {
+			_ = conn.WriteJSON(wsError("chat.error", req.ID, err))
+			return
+		}
+		historyLimit := req.HistoryLimit
+		if historyLimit == 0 {
+			historyLimit = db.DefaultHistoryLimit
+		}
+		recent, err := db.ListRecentChatMessages(database, session.ID, historyLimit)
+		if err != nil {
+			_ = conn.WriteJSON(wsError("chat.error", req.ID, err))
+			return
+		}
+		history = append(history, toLLMMessages(recent)...)
+	} else {
+		session, err = db.CreateChatSession(database, firstUserContent(incomingMessages))
+		if err != nil {
+			_ = conn.WriteJSON(wsError("chat.error", req.ID, err))
+			return
+		}
+	}
+	messages := contextpack.Pack(req.SystemPrompt, history, incomingMessages, req.MaxContextChars)
 	resp, err := client.Chat(nilContext(), llm.ChatRequest{Model: model, Messages: messages})
 	if err != nil {
 		_ = conn.WriteJSON(wsError("chat.error", req.ID, err))
 		return
 	}
-	_ = conn.WriteJSON(wsEvent("chat.result", req.ID, map[string]any{"response": resp}))
+	for _, message := range incomingMessages {
+		if _, err := db.AddChatMessage(database, session.ID, message.Role, message.Content, model); err != nil {
+			_ = conn.WriteJSON(wsError("chat.error", req.ID, err))
+			return
+		}
+	}
+	if _, err := db.AddChatMessage(database, session.ID, "assistant", resp.Content, resp.Model); err != nil {
+		_ = conn.WriteJSON(wsError("chat.error", req.ID, err))
+		return
+	}
+	_ = conn.WriteJSON(wsEvent("chat.result", req.ID, map[string]any{
+		"session_id":       session.ID,
+		"history_messages": len(messages) - len(incomingMessages) - 1,
+		"context":          contextpack.Stats(messages),
+		"response":         resp,
+	}))
 }
 
 func (s *Server) handleWSAgentChat(conn *websocket.Conn, req wsRequest) {
