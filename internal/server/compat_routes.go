@@ -3,6 +3,9 @@ package server
 func (s *Server) registerCompatRoutes() {
 	e := s.echo
 
+	e.POST("/api/v1/chat/stream", s.handleChatStream)
+	e.POST("/api/v1/chat/stop", s.handleChatStop)
+
 	e.GET("/api/v1/backends", s.handleListBackends)
 	e.GET("/api/v1/backends/ollama-models", s.handleFetchOllamaModels)
 	e.GET("/api/v1/version", s.handleVersion)
