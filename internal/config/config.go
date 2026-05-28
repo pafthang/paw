@@ -55,6 +55,14 @@ func Path() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
+func DBPath() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "paw.db"), nil
+}
+
 func AccessTokenPath() (string, error) {
 	dir, err := Dir()
 	if err != nil {
