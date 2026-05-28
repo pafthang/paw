@@ -1,0 +1,159 @@
+// Package bus provides in-process message routing and event broadcast helpers.
+package bus
+
+import (
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+)
+
+// InboundDebouncer buffers rapid inbound messages from the same sender and
+// merges them into a single message before calling flushFn.
+type InboundDebouncer struct {
+	debounce time.Duration
+	mu       sync.Mutex
+	buffers  map[string]*debounceBuffer
+	flushFn  func(InboundMessage)
+}
+
+type debounceBuffer struct {
+	messages []InboundMessage
+	timer    *time.Timer
+}
+
+// NewInboundDebouncer creates a debouncer with the given window and flush callback.
+// If debounce <= 0, messages are passed through immediately.
+func NewInboundDebouncer(debounce time.Duration, flushFn func(InboundMessage)) *InboundDebouncer {
+	return &InboundDebouncer{
+		debounce: debounce,
+		buffers:  make(map[string]*debounceBuffer),
+		flushFn:  flushFn,
+	}
+}
+
+// Push adds a message to the debounce buffer.
+// Media messages bypass the debounce window after flushing any pending text.
+func (d *InboundDebouncer) Push(msg InboundMessage) {
+	if d.debounce <= 0 {
+		d.flushFn(msg)
+		return
+	}
+
+	key := debounceKey(msg)
+
+	if len(msg.Media) > 0 {
+		d.flushKey(key)
+		d.flushFn(msg)
+		return
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	buf, exists := d.buffers[key]
+	if !exists {
+		buf = &debounceBuffer{}
+		d.buffers[key] = buf
+	}
+
+	buf.messages = append(buf.messages, msg)
+
+	if buf.timer != nil {
+		buf.timer.Stop()
+	}
+	buf.timer = time.AfterFunc(d.debounce, func() {
+		d.flushKey(key)
+	})
+
+	if len(buf.messages) == 1 {
+		slog.Debug("inbound debounce: buffering",
+			"key", key,
+			"debounce_ms", d.debounce.Milliseconds(),
+		)
+	} else {
+		slog.Debug("inbound debounce: message appended",
+			"key", key,
+			"buffered", len(buf.messages),
+		)
+	}
+}
+
+// Stop flushes all pending buffers immediately.
+func (d *InboundDebouncer) Stop() {
+	d.mu.Lock()
+	keys := make([]string, 0, len(d.buffers))
+	for k := range d.buffers {
+		keys = append(keys, k)
+	}
+	d.mu.Unlock()
+
+	for _, key := range keys {
+		d.flushKey(key)
+	}
+}
+
+func (d *InboundDebouncer) flushKey(key string) {
+	d.mu.Lock()
+	buf, exists := d.buffers[key]
+	if !exists || len(buf.messages) == 0 {
+		d.mu.Unlock()
+		return
+	}
+
+	if buf.timer != nil {
+		buf.timer.Stop()
+	}
+
+	msgs := buf.messages
+	delete(d.buffers, key)
+	d.mu.Unlock()
+
+	merged := mergeInboundMessages(msgs)
+
+	if len(msgs) > 1 {
+		slog.Info("inbound debounce: merged messages",
+			"key", key,
+			"count", len(msgs),
+			"content_preview", truncateStr(merged.Content, 80),
+		)
+	}
+
+	d.flushFn(merged)
+}
+
+func debounceKey(msg InboundMessage) string {
+	workspace := msg.WorkspaceID.String()
+	return workspace + ":" + msg.Channel + ":" + msg.ChatID + ":" + msg.SenderID
+}
+
+func mergeInboundMessages(msgs []InboundMessage) InboundMessage {
+	if len(msgs) == 1 {
+		return msgs[0]
+	}
+
+	last := msgs[len(msgs)-1]
+
+	parts := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Content != "" {
+			parts = append(parts, m.Content)
+		}
+	}
+	last.Content = strings.Join(parts, "\n")
+
+	var media []MediaFile
+	for _, m := range msgs {
+		media = append(media, m.Media...)
+	}
+	last.Media = media
+
+	return last
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
