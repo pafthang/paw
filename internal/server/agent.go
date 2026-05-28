@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/pafthang/paw/internal/agent"
 	"github.com/pafthang/paw/internal/db"
+	"github.com/pafthang/paw/internal/llm"
 	"github.com/pafthang/paw/internal/tools"
 )
 
@@ -26,6 +27,31 @@ func (s *Server) handleAgentRun(c echo.Context) error {
 	}
 	runner := agent.NewRunner(database, tools.DefaultRegistry())
 	resp, err := runner.Run(c.Request().Context(), req)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (s *Server) handleAgentChat(c echo.Context) error {
+	var req agent.ChatRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+	}
+	settings := s.settings
+	if req.Model == "" {
+		req.Model = llm.DefaultModel(settings)
+	}
+	client, err := llm.NewClient(settings)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	runner := agent.NewDefaultRunner(database)
+	resp, err := runner.Chat(c.Request().Context(), client, req)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
