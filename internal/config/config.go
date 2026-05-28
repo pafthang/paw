@@ -36,7 +36,16 @@ func DefaultSettings() Settings {
 		OllamaHost:              "http://127.0.0.1:11434",
 		OpenAICompatibleBaseURL: "https://api.openai.com/v1",
 		HealthCheckOnStartup:    true,
-		CORSAllowedOrigins:      []string{"http://localhost:1420"},
+		CORSAllowedOrigins:      DefaultCORSAllowedOrigins(),
+	}
+}
+
+func DefaultCORSAllowedOrigins() []string {
+	return []string{
+		"http://localhost:1420",
+		"http://127.0.0.1:1420",
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
 	}
 }
 
@@ -141,6 +150,9 @@ func Load() (Settings, error) {
 	}
 	if settings.OpenAICompatibleBaseURL == "" {
 		settings.OpenAICompatibleBaseURL = "https://api.openai.com/v1"
+	}
+	if len(settings.CORSAllowedOrigins) == 0 {
+		settings.CORSAllowedOrigins = DefaultCORSAllowedOrigins()
 	}
 	return settings, nil
 }
