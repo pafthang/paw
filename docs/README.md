@@ -1,6 +1,6 @@
 # Paw Go Core — документация
 
-Эта папка собирает разрозненные заметки по Go-порту Paw в понятную документацию.
+Эта папка собирает разрозненные заметки по Go-порту Paw в понятную документацию. Корневые roadmap/gap файлы перенесены сюда и структурированы.
 
 ## Что здесь есть
 
@@ -13,8 +13,8 @@
 | [05-agent-tools-loop.md](05-agent-tools-loop.md) | Agent loop, tool calls, file/shell tools, final response |
 | [06-api-websocket.md](06-api-websocket.md) | HTTP API, auth, WebSocket events |
 | [07-security-audit-sandbox.md](07-security-audit-sandbox.md) | Token auth, workspace sandbox, shell policy, audit log |
-| [08-roadmap.md](08-roadmap.md) | Дорожная карта Stage 5–8 |
-| [99-source-map.md](99-source-map.md) | Откуда взяты исходные заметки |
+| [08-roadmap.md](08-roadmap.md) | Сверенный roadmap/status Stage 5–8: что реализовано, что partial/todo/deferred |
+| [09-python-go-gaps.md](09-python-go-gaps.md) | Python → Go gap analysis: что еще не портировано и в каком порядке браться |
 
 ## Быстрый запуск
 
@@ -34,4 +34,6 @@ curl -s http://127.0.0.1:8888/api/v1/status
 
 ## Текущее состояние
 
-Go core уже описан как side-by-side реализация рядом с существующим Python-кодом. Реализованы базовые CLI/API поверхности, LLM chat, провайдеры, сессии, tool execution foundation, agent loop, контекстный replay и context budget. Следующий крупный блок — полноценная память, file store/search, улучшение сессий и дальнейшая доводка agent/runtime слоя.
+Go core — side-by-side реализация рядом с существующим Python-кодом. Уже реализованы CLI/API поверхности, LLM providers, sessions, memory, file-store, search, skills, MCP, agent/tool loop, audit, WebSocket и Telegram channel baseline.
+
+Главные следующие задачи: тесты для уже реализованных Stage 5–7 поверхностей, auth/OAuth/API-key design, минимальный порт нужных Python API endpoints для UI/client, затем daemon/vector/browser только при реальной необходимости.
