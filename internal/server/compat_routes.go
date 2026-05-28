@@ -7,6 +7,11 @@ func (s *Server) registerCompatRoutes() {
 	e.GET("/api/v1/backends/ollama-models", s.handleFetchOllamaModels)
 	e.GET("/api/v1/version", s.handleVersion)
 
+	e.GET("/api/v1/metrics/system", s.handleSystemMetrics)
+	e.GET("/api/v1/metrics/usage", s.handleUsageSummary)
+	e.GET("/api/v1/metrics/usage/recent", s.handleRecentUsage)
+	e.DELETE("/api/v1/metrics/usage", s.handleClearUsage)
+
 	e.POST("/api/v1/health/check", s.handleHealthCompat)
 	e.GET("/api/v1/health/errors", s.handleHealthErrors)
 	e.DELETE("/api/v1/health/errors", s.handleClearHealthErrors)
