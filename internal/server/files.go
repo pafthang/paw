@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"net/http"
 	"strconv"
 
@@ -21,6 +23,31 @@ func (s *Server) handleListFiles(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, items)
+}
+
+func (s *Server) handleRecentFiles(c echo.Context) error {
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	items, err := filestore.List(database, limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		ext := strings.TrimPrefix(filepath.Ext(item.Name), ".")
+		out = append(out, map[string]any{
+			"path":      item.Path,
+			"name":      item.Name,
+			"is_dir":    false,
+			"extension": ext,
+			"timestamp": item.UpdatedAt.Unix(),
+			"tool":      "file-store",
+		})
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 func (s *Server) handleCreateFile(c echo.Context) error {
