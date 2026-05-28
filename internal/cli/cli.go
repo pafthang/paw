@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/pafthang/paw/internal/config"
+	"github.com/pafthang/paw/internal/contextpack"
 	"github.com/pafthang/paw/internal/db"
 	"github.com/pafthang/paw/internal/health"
 	"github.com/pafthang/paw/internal/llm"
@@ -37,7 +38,7 @@ func newRootCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	}
 	root.SetOut(out)
 	root.SetErr(os.Stderr)
-	root.Version = "go-core-stage5"
+	root.Version = "go-core-stage6"
 
 	root.AddCommand(newServeCommand(ctx), newChatCommand(ctx, out), newStatusCommand(out), newDoctorCommand(ctx, out), newConfigCommand(out), newDBCommand(out), newSessionsCommand(out))
 	root.AddCommand(&cobra.Command{
@@ -70,7 +71,9 @@ func newChatCommand(ctx context.Context, out io.Writer) *cobra.Command {
 	cmd.Flags().String("model", "", "model to use")
 	cmd.Flags().Bool("json", false, "print JSON response")
 	cmd.Flags().Uint("session", 0, "append to an existing session id")
-	cmd.Flags().Int("history-limit", db.DefaultHistoryLimit, "max previous session messages to include as LLM context")
+	cmd.Flags().Int("history-limit", db.DefaultHistoryLimit, "max previous session messages to consider for LLM context")
+	cmd.Flags().String("system", contextpack.DefaultSystemPrompt, "system prompt prepended to the LLM context")
+	cmd.Flags().Int("max-context-chars", contextpack.DefaultMaxContextChars, "rough maximum chars for packed LLM context")
 	return cmd
 }
 
@@ -157,9 +160,11 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	sessionID, _ := cmd.Flags().GetUint("session")
 	historyLimit, _ := cmd.Flags().GetInt("history-limit")
+	systemPrompt, _ := cmd.Flags().GetString("system")
+	maxContextChars, _ := cmd.Flags().GetInt("max-context-chars")
 	prompt := strings.TrimSpace(strings.Join(args, " "))
 	if prompt == "" {
-		return errors.New("usage: paw chat [--model MODEL] [--session ID] [--history-limit N] <prompt>")
+		return errors.New("usage: paw chat [--model MODEL] [--session ID] [--history-limit N] [--max-context-chars N] <prompt>")
 	}
 
 	database, err := db.Open()
@@ -167,7 +172,8 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 		return err
 	}
 	var session *db.ChatSession
-	var messages []llm.Message
+	var history []llm.Message
+	incoming := []llm.Message{{Role: "user", Content: prompt}}
 	if sessionID > 0 {
 		session, err = db.GetChatSession(database, uint(sessionID))
 		if err != nil {
@@ -177,14 +183,14 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 		if err != nil {
 			return err
 		}
-		messages = append(messages, toLLMMessages(recent)...)
+		history = append(history, toLLMMessages(recent)...)
 	} else {
 		session, err = db.CreateChatSession(database, prompt)
 		if err != nil {
 			return err
 		}
 	}
-	messages = append(messages, llm.Message{Role: "user", Content: prompt})
+	messages := contextpack.Pack(systemPrompt, history, incoming, maxContextChars)
 
 	client, err := llm.NewClient(settings)
 	if err != nil {
@@ -201,10 +207,11 @@ func runChat(ctx context.Context, out io.Writer, cmd *cobra.Command, args []stri
 		return err
 	}
 
+	stats := contextpack.Stats(messages)
 	if jsonOut {
-		return json.NewEncoder(out).Encode(map[string]any{"session_id": session.ID, "history_messages": len(messages) - 1, "response": resp})
+		return json.NewEncoder(out).Encode(map[string]any{"session_id": session.ID, "history_messages": len(messages) - len(incoming) - 1, "context": stats, "response": resp})
 	}
-	fmt.Fprintf(out, "%s\n\n[session:%d history:%d]\n", resp.Content, session.ID, len(messages)-1)
+	fmt.Fprintf(out, "%s\n\n[session:%d history:%d context:%v chars]\n", resp.Content, session.ID, len(messages)-len(incoming)-1, stats["chars"])
 	return nil
 }
 
@@ -216,7 +223,7 @@ func runStatus(out io.Writer) error {
 	payload := map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage5",
+		"stage":         "core-stage6",
 		"stack":         []string{"cobra", "echo", "gorm", "sqlite"},
 		"config_dir":    must(config.Dir()),
 		"config_path":   must(config.Path()),
