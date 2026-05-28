@@ -3,6 +3,12 @@ package server
 func (s *Server) registerCompatRoutes() {
 	e := s.echo
 
+	e.GET("/api/v1/memory/settings", s.handleMemorySettings)
+	e.POST("/api/v1/memory/settings", s.handleSaveMemorySettings)
+	e.GET("/api/v1/memory/stats", s.handleMemoryStats)
+	e.GET("/api/v1/memory/long_term", s.handleLongTermMemory)
+	e.DELETE("/api/v1/memory/long_term/:id", s.handleDeleteLongTermMemory)
+
 	e.GET("/api/v1/files/recent", s.handleRecentFiles)
 
 	e.GET("/api/v1/identity", s.handleIdentityGet)
