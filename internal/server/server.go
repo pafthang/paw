@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pafthang/paw/internal/config"
+	"github.com/pafthang/paw/internal/db"
 	"github.com/pafthang/paw/internal/health"
 	"github.com/pafthang/paw/internal/llm"
 )
@@ -40,6 +42,9 @@ func New(settings config.Settings) *Server {
 	e.GET("/api/v1/status", s.handleStatus)
 	e.GET("/api/v1/settings", s.handleSettings)
 	e.POST("/api/v1/chat", s.handleChat)
+	e.GET("/api/v1/sessions", s.handleListSessions)
+	e.GET("/api/v1/sessions/:id", s.handleGetSession)
+	e.DELETE("/api/v1/sessions/:id", s.handleDeleteSession)
 
 	return s
 }
@@ -70,8 +75,8 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"name":    "paw",
-		"mode":    "go-core-stage3",
-		"message": "PocketPaw Go core stage 3 is running.",
+		"mode":    "go-core-stage4",
+		"message": "PocketPaw Go core stage 4 is running.",
 		"stack": []string{
 			"cobra",
 			"echo",
@@ -83,6 +88,9 @@ func (s *Server) handleIndex(c echo.Context) error {
 			"GET /api/v1/status",
 			"GET /api/v1/settings",
 			"POST /api/v1/chat",
+			"GET /api/v1/sessions",
+			"GET /api/v1/sessions/:id",
+			"DELETE /api/v1/sessions/:id",
 		},
 	})
 }
@@ -95,7 +103,7 @@ func (s *Server) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "core-stage3",
+		"stage":         "core-stage4",
 		"web_host":      s.settings.WebHost,
 		"web_port":      s.settings.WebPort,
 		"agent_backend": s.settings.AgentBackend,
@@ -120,9 +128,10 @@ func (s *Server) handleSettings(c echo.Context) error {
 
 func (s *Server) handleChat(c echo.Context) error {
 	var req struct {
-		Model    string        `json:"model,omitempty"`
-		Prompt   string        `json:"prompt,omitempty"`
-		Messages []llm.Message `json:"messages,omitempty"`
+		Model     string        `json:"model,omitempty"`
+		Prompt    string        `json:"prompt,omitempty"`
+		Messages  []llm.Message `json:"messages,omitempty"`
+		SessionID uint          `json:"session_id,omitempty"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
@@ -146,7 +155,86 @@ func (s *Server) handleChat(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, resp)
+
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	var session *db.ChatSession
+	if req.SessionID > 0 {
+		session, err = db.GetChatSession(database, req.SessionID)
+	} else {
+		session, err = db.CreateChatSession(database, firstUserContent(messages))
+	}
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	for _, message := range messages {
+		if _, err := db.AddChatMessage(database, session.ID, message.Role, message.Content, model); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+	}
+	if _, err := db.AddChatMessage(database, session.ID, "assistant", resp.Content, resp.Model); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"session_id": session.ID, "response": resp})
+}
+
+func (s *Server) handleListSessions(c echo.Context) error {
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	sessions, err := db.ListChatSessions(database, limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, sessions)
+}
+
+func (s *Server) handleGetSession(c echo.Context) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+	}
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	session, err := db.GetChatSession(database, uint(id))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, session)
+}
+
+func (s *Server) handleDeleteSession(c echo.Context) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+	}
+	database, err := db.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if err := db.DeleteChatSession(database, uint(id)); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"deleted": true, "id": id})
+}
+
+func firstUserContent(messages []llm.Message) string {
+	for _, message := range messages {
+		if message.Role == "user" && message.Content != "" {
+			return message.Content
+		}
+	}
+	if len(messages) > 0 {
+		return messages[0].Content
+	}
+	return "New chat"
 }
 
 func securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
