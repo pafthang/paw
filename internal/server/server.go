@@ -31,6 +31,7 @@ func New(settings config.Settings) *Server {
 	e.HidePort = true
 	e.Use(middleware.Recover())
 	e.Use(securityHeaders)
+	e.Use(accessTokenMiddleware)
 
 	s := &Server{
 		settings: settings,
@@ -39,6 +40,7 @@ func New(settings config.Settings) *Server {
 	}
 
 	e.GET("/", s.handleIndex)
+	e.GET("/ws", s.handleWS)
 	e.GET("/api/v1/health", s.handleHealth)
 	e.GET("/api/v1/status", s.handleStatus)
 	e.GET("/api/v1/settings", s.handleSettings)
@@ -80,8 +82,8 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleIndex(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"name":    "paw",
-		"mode":    "go-core-agent-tool-calls",
-		"message": "PocketPaw Go core LLM-driven tool call agent is running.",
+		"mode":    "go-core-stage2-auth-ws",
+		"message": "PocketPaw Go core API compatibility layer is running.",
 		"stack": []string{
 			"cobra",
 			"echo",
@@ -92,6 +94,7 @@ func (s *Server) handleIndex(c echo.Context) error {
 			"GET /api/v1/health",
 			"GET /api/v1/status",
 			"GET /api/v1/settings",
+			"GET /ws",
 			"POST /api/v1/chat",
 			"GET /api/v1/sessions",
 			"GET /api/v1/sessions/:id",
@@ -112,7 +115,7 @@ func (s *Server) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":        "ok",
 		"implementation": "go",
-		"stage":         "agent-tool-calls",
+		"stage":         "stage2-auth-ws",
 		"web_host":      s.settings.WebHost,
 		"web_port":      s.settings.WebPort,
 		"agent_backend": s.settings.AgentBackend,
