@@ -164,6 +164,14 @@ func (s *Server) handleWSAgentChat(conn *websocket.Conn, req wsRequest) {
 		HistoryLimit:    req.HistoryLimit,
 		MaxContextChars: req.MaxContextChars,
 		SystemPrompt:    req.SystemPrompt,
+		OnTool: func(event agent.ToolEvent) {
+			_ = conn.WriteJSON(wsEvent("agent."+event.Type, req.ID, map[string]any{
+				"index":     event.Index,
+				"tool_name": event.ToolName,
+				"call":      event.Call,
+				"result":    event.Result,
+			}))
+		},
 	})
 	if err != nil {
 		_ = conn.WriteJSON(wsError("agent.error", req.ID, err))
